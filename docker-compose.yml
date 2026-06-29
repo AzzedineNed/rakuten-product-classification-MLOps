@@ -1,0 +1,30 @@
+services:
+  api:
+    build: .
+    image: rakuten-image-mlops:latest
+    container_name: rakuten-image-api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist data, trained models and reports on the host.
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./reports:/app/reports
+      # Cache downloaded backbone weights across runs.
+      - torch-cache:/root/.cache/torch
+    environment:
+      - RAKUTEN_CLASSIFIER=mlp
+    restart: unless-stopped
+
+    # --- Optional GPU (nvidia-container-toolkit, no Docker Desktop) ---
+    # Uncomment to expose your GPU. Not needed for this pipeline.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  torch-cache:
