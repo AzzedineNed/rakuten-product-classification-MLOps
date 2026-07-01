@@ -48,7 +48,8 @@ def build_classifier(kind: Optional[str] = None):
     raise ValueError(f"Unknown classifier kind: {kind!r} (use 'mlp' or 'logreg')")
 
 
-def save(clf, path: Path = config.CLASSIFIER_PATH, extra: Optional[dict] = None) -> None:
+def save(clf, path: Path = config.CLASSIFIER_PATH, extra: Optional[dict] = None,
+         run_id: Optional[str] = None) -> None:
     config.MODELS_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "classifier": clf,
@@ -57,6 +58,7 @@ def save(clf, path: Path = config.CLASSIFIER_PATH, extra: Optional[dict] = None)
         "feature_dim": config.FEATURE_DIM,
         "classifier_type": config.CLASSIFIER_TYPE,
         "saved_at": datetime.now(timezone.utc).isoformat(),
+        "mlflow_run_id": run_id,
         "extra": extra or {},
     }
     joblib.dump(payload, path)

@@ -6,6 +6,14 @@ Produces (in reports/):
   * classification_report.txt
   * confusion_matrix.png
 
+If MLflow tracking is configured, the test metrics, the confusion matrix, the
+classification report, and the model are logged. When the loaded model carries
+the MLflow run_id from its training run (train.py stores it), these are attached
+to that SAME run, so one run holds the full story (train params + val metrics +
+test metrics + confusion matrix + model). If there is no stored run_id (e.g. an
+older model), a standalone evaluation run is logged instead. Tracking is
+best-effort and never blocks evaluation.
+
 Examples:
   python scripts/evaluate.py
 """
@@ -13,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 
 import _bootstrap  # noqa: F401
 import numpy as np
@@ -65,17 +74,21 @@ def evaluate() -> dict:
     (config.REPORTS_DIR / "metrics.json").write_text(json.dumps(metrics, indent=2))
     print(report)
 
-    _plot_confusion(y_test, y_pred, present, target_names)
+    cm_path = _plot_confusion(y_test, y_pred, present, target_names)
+
+    _log_to_mlflow(payload, metrics, cm_path)
     print("🎉 evaluate.py done. See reports/.")
     return metrics
 
 
-def _plot_confusion(y_true, y_pred, labels, target_names) -> None:
+def _plot_confusion(y_true, y_pred, labels, target_names):
     """Save an annotated confusion matrix with two panels:
       * left  — raw counts (zeros left blank to cut clutter)
       * right — row-normalized, i.e. each row sums to 1 so the diagonal is the
                 per-class recall; this is what actually reveals which classes
                 bleed into which.
+
+    Returns the output path so the caller can log it as an MLflow artifact.
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -123,6 +136,47 @@ def _plot_confusion(y_true, y_pred, labels, target_names) -> None:
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"🖼️  Saved {out}")
+    return out
+
+
+def _log_to_mlflow(payload, metrics, cm_path):
+    """Best-effort MLflow logging. Attaches test metrics + confusion matrix +
+    classification report + model to the training run recorded in the model
+    payload; falls back to a standalone evaluation run if no run_id is stored.
+    Never raises into the evaluation path."""
+    if not os.getenv("MLFLOW_TRACKING_URI"):
+        print("ℹ️  MLFLOW_TRACKING_URI not set — skipping experiment logging.")
+        return
+    try:
+        import mlflow
+
+        run_id = payload.get("mlflow_run_id")
+        mlflow.set_experiment(os.getenv("MLFLOW_EXPERIMENT_NAME", "rakuten-image"))
+        linked = bool(run_id)
+        ctx = mlflow.start_run(run_id=run_id) if linked else mlflow.start_run()
+        with ctx:
+            mlflow.set_tag("modality", "image")
+            if not linked:
+                mlflow.set_tag("stage", "evaluate-standalone")
+            # Log only numeric metrics (skip the string entries backbone/classifier_type).
+            numeric = {k: float(v) for k, v in metrics.items()
+                       if isinstance(v, (int, float)) and not isinstance(v, bool)}
+            mlflow.log_metrics(numeric)
+            mlflow.log_artifact(str(cm_path), artifact_path="plots")
+            report_p = config.REPORTS_DIR / "classification_report.txt"
+            if report_p.exists():
+                mlflow.log_artifact(str(report_p), artifact_path="reports")
+            metrics_p = config.REPORTS_DIR / "metrics.json"
+            if metrics_p.exists():
+                mlflow.log_artifact(str(metrics_p), artifact_path="reports")
+            if config.CLASSIFIER_PATH.exists():
+                mlflow.log_artifact(str(config.CLASSIFIER_PATH), artifact_path="model")
+        if linked:
+            print(f"📝 Attached test metrics + confusion matrix to training run ({run_id[:8]}…).")
+        else:
+            print("📝 Logged a standalone evaluation run (no training run_id found).")
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠️  MLflow logging skipped ({type(exc).__name__}: {exc}).")
 
 
 def main() -> None:
