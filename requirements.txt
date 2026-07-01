@@ -37,3 +37,7 @@ pytest==8.2.0
 # Experiment tracking & data versioning (DagsHub-hosted)
 mlflow==3.14.0
 dagshub==0.7.0
+
+# Data & model versioning (DVC over DagsHub HTTP remote)
+dvc==3.67.1
+dvc-http==2.32.0
