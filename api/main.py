@@ -35,8 +35,11 @@ _TRAIN_STATUS: dict = {"state": "idle", "detail": None, "metrics": None}
 
 @app.get("/health")
 def health():
+    import predict as predict_script  # scripts/predict.py
+
     model_present = config.CLASSIFIER_PATH.exists()
     return {"status": "ok", "model_loaded": model_present,
+            "model_source": predict_script.model_source(),
             "backbone": config.BACKBONE_NAME, "num_classes": config.NUM_CLASSES}
 
 

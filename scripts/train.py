@@ -10,9 +10,12 @@ Experiment tracking: if an MLflow tracking server is configured (via
 MLFLOW_TRACKING_URI, e.g. a DagsHub repo's .mlflow endpoint), this run's
 parameters and train/val metrics are logged, and the MLflow run_id is saved
 *into the model payload* so evaluate.py can attach the test metrics and the
-confusion matrix to the SAME run. If tracking is not configured or unreachable,
-training proceeds and the model is still saved locally — logging is best-effort
-and never blocks a train.
+confusion matrix to the SAME run. After saving, the model file is also logged
+to that run and registered as a new version of config.REGISTERED_MODEL_NAME in
+the MLflow Model Registry, which is what the serving path (predict.py / the
+API) pulls from. If tracking is not configured or unreachable, training
+proceeds and the model is still saved locally — logging and registration are
+best-effort and never block a train.
 
 Examples:
   python scripts/train.py
@@ -81,6 +84,11 @@ def train() -> dict:
     # run_id stays None and the model is still saved normally.
     run_id = _log_to_mlflow(metrics)
     classifier.save(clf, extra=metrics, run_id=run_id)
+
+    # Publish the saved model: attach the file to the training run and register
+    # a new version in the MLflow Model Registry (best-effort, never raises).
+    # The local save above already succeeded, so a failure here costs nothing.
+    classifier.register_in_mlflow(run_id)
 
     print(f"🎉 train.py done in {metrics['elapsed_sec']}s")
     return metrics

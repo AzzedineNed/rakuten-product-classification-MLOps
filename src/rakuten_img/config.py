@@ -124,6 +124,14 @@ CLASSIFIER_TYPE = os.getenv("RAKUTEN_CLASSIFIER", "mlp")
 MLP_HIDDEN = (256,)
 
 # --------------------------------------------------------------------------- #
+# MLflow Model Registry
+# --------------------------------------------------------------------------- #
+# Name under which train.py registers each new model version, and from which
+# predict.py/the API serve (with a local-.joblib fallback). One registered
+# model per modality; the text service will use its own name.
+REGISTERED_MODEL_NAME = os.getenv("RAKUTEN_REGISTERED_MODEL", "rakuten-image-classifier")
+
+# --------------------------------------------------------------------------- #
 # Cached artifacts
 # --------------------------------------------------------------------------- #
 def feature_files(split: str) -> tuple[Path, Path]:

@@ -6,13 +6,14 @@ Produces (in reports/):
   * classification_report.txt
   * confusion_matrix.png
 
-If MLflow tracking is configured, the test metrics, the confusion matrix, the
-classification report, and the model are logged. When the loaded model carries
-the MLflow run_id from its training run (train.py stores it), these are attached
-to that SAME run, so one run holds the full story (train params + val metrics +
-test metrics + confusion matrix + model). If there is no stored run_id (e.g. an
-older model), a standalone evaluation run is logged instead. Tracking is
-best-effort and never blocks evaluation.
+If MLflow tracking is configured, the test metrics, the confusion matrix and the
+classification report are logged. When the loaded model carries the MLflow
+run_id from its training run (train.py stores it), these are attached to that
+SAME run, so one run holds the full story (train params + val metrics + test
+metrics + confusion matrix + registered model). The model artifact itself is
+logged and REGISTERED by train.py, not here. If there is no stored run_id
+(e.g. an older model), a standalone evaluation run is logged instead. Tracking
+is best-effort and never blocks evaluation.
 
 Examples:
   python scripts/evaluate.py
@@ -141,9 +142,10 @@ def _plot_confusion(y_true, y_pred, labels, target_names):
 
 def _log_to_mlflow(payload, metrics, cm_path):
     """Best-effort MLflow logging. Attaches test metrics + confusion matrix +
-    classification report + model to the training run recorded in the model
-    payload; falls back to a standalone evaluation run if no run_id is stored.
-    Never raises into the evaluation path."""
+    classification report to the training run recorded in the model payload;
+    falls back to a standalone evaluation run if no run_id is stored. The model
+    artifact itself is logged and registered by train.py. Never raises into the
+    evaluation path."""
     if not os.getenv("MLFLOW_TRACKING_URI"):
         print("ℹ️  MLFLOW_TRACKING_URI not set — skipping experiment logging.")
         return
@@ -169,8 +171,6 @@ def _log_to_mlflow(payload, metrics, cm_path):
             metrics_p = config.REPORTS_DIR / "metrics.json"
             if metrics_p.exists():
                 mlflow.log_artifact(str(metrics_p), artifact_path="reports")
-            if config.CLASSIFIER_PATH.exists():
-                mlflow.log_artifact(str(config.CLASSIFIER_PATH), artifact_path="model")
         if linked:
             print(f"📝 Attached test metrics + confusion matrix to training run ({run_id[:8]}…).")
         else:
