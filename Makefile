@@ -5,14 +5,15 @@ PY := .venv/bin/python
 PIP := .venv/bin/pip
 SOURCE ?=
 
-.PHONY: help setup install test collect process train evaluate predict serve \
+.PHONY: help setup install test collect collect-ens process train evaluate predict serve \
         docker-build docker-up docker-down clean
 
 help:
 	@echo "Targets:"
 	@echo "  setup        create .venv and install deps (CPU torch)"
 	@echo "  test         run unit tests (no torch/data needed)"
-	@echo "  collect      acquire raw data       (SOURCE=/path/or/url)"
+	@echo "  collect      acquire raw data from local source (SOURCE=/path/or/url)"
+	@echo "  collect-ens  acquire raw data from ENS Challenge Data credentials"
 	@echo "  process      extract & cache features"
 	@echo "  train        train the classifier head"
 	@echo "  evaluate     evaluate on the test set"
