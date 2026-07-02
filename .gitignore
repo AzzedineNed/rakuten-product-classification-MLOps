@@ -24,3 +24,6 @@ venv/
 .pytest_cache/
 .ipynb_checkpoints/
 .DS_Store
+
+# Nginx basic-auth credentials (create locally: see nginx/default.conf header)
+nginx/.htpasswd
