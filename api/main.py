@@ -75,7 +75,12 @@ def _run_training(reprocess: bool) -> None:
     try:
         if reprocess:
             import process as process_script
-            process_script.main()  # re-extract features (heavy)
+            # Call process() (the library function), NOT main(): main() runs
+            # argparse on sys.argv, which inside uvicorn holds the SERVER's
+            # arguments -> argparse raises SystemExit, which `except Exception`
+            # does not catch, killing the task and wedging _TRAIN_STATUS on
+            # "running" forever.
+            process_script.process()  # re-extract features (heavy)
         import train as train_script
         metrics = train_script.train()
         _TRAIN_STATUS.update(state="done", metrics=metrics, detail="completed")

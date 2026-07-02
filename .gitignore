@@ -8,6 +8,10 @@ models/*
 reports/*
 !reports/.gitkeep
 
+# DVC internals: .dvc/.gitignore (written by DVC) already ignores
+# config.local (token), tmp/ and cache/. .dvc/config MUST be committed
+# so teammates get the remote definition and `dvc pull` works.
+
 # Python
 __pycache__/
 *.py[cod]
@@ -20,4 +24,3 @@ venv/
 .pytest_cache/
 .ipynb_checkpoints/
 .DS_Store
-/models
