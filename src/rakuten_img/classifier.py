@@ -81,12 +81,20 @@ def load(path: Path = config.CLASSIFIER_PATH) -> dict:
 
 
 def register_in_mlflow(run_id: Optional[str],
-                       path: Path = config.CLASSIFIER_PATH) -> Optional[str]:
+                       path: Path = config.CLASSIFIER_PATH,
+                       tags: Optional[dict] = None) -> Optional[str]:
     """Best-effort: attach the saved model file to the given MLflow run (under
     artifact path 'model/') and register it as a new version of
     config.REGISTERED_MODEL_NAME. Returns the new version string, or None if
     tracking is off, there is no run to attach to, or anything fails. Never
     raises into the training path.
+
+    `tags` are DESCRIPTIVE metadata attached to the new version (val F1,
+    classifier type, host vs container, ...) so a human comparing versions in
+    the registry UI can tell them apart. They confer no privilege: nothing is
+    served because of a tag. Promotion is the separate, explicit alias step in
+    scripts/promote.py. Tagging failures are logged and ignored — a tag is not
+    worth losing a registered version over.
     """
     if not os.getenv("MLFLOW_TRACKING_URI"):
         return None
@@ -113,14 +121,51 @@ def register_in_mlflow(run_id: Optional[str],
         source = f"{client.get_run(run_id).info.artifact_uri}/model/{path.name}"
         mv = client.create_model_version(name=name, source=source, run_id=run_id)
         print(f"📦 Registered '{name}' version {mv.version} (run {run_id[:8]}…).")
+        # 4) Descriptive tags, set one at a time (the call we verified works on
+        #    DagsHub). Each is independently best-effort: the version is already
+        #    created and a missing tag must not turn success into failure.
+        for key, value in (tags or {}).items():
+            try:
+                client.set_model_version_tag(name, mv.version, key, str(value))
+            except Exception as exc:  # noqa: BLE001
+                print(f"⚠️  Could not tag {key}={value} ({type(exc).__name__}).")
         return str(mv.version)
     except Exception as exc:  # noqa: BLE001
         print(f"⚠️  Model registration skipped ({type(exc).__name__}: {exc}).")
         return None
 
 
-def load_from_registry() -> dict:
-    """Download and load the NEWEST version of the registered model.
+def resolve_registry_version(client, name: str, alias: Optional[str] = None):
+    """Pick which registered version to serve: the one carrying `alias` if that
+    alias resolves, otherwise the highest version number.
+
+    Returns (version_object, source_string). Raises LookupError only when the
+    registered model has no versions at all.
+
+    Split out from load_from_registry() so the selection rule — the part with
+    the actual decision in it — is testable without a network, a real MLflow
+    server, or a 4 MB artifact download.
+    """
+    alias = alias or config.PRODUCTION_ALIAS
+    try:
+        mv = client.get_model_version_by_alias(name, alias)
+        return mv, f"registry:{name}@{alias}/v{mv.version}"
+    except Exception as exc:  # noqa: BLE001
+        # No alias set yet (fresh registry), a typo'd alias, or a backend that
+        # does not implement aliases. All three mean the same thing here: fall
+        # back to newest-version behaviour rather than failing to serve.
+        print(f"ℹ️  No '{alias}' alias on '{name}' ({type(exc).__name__}) — "
+              f"falling back to the newest version.")
+    versions = client.search_model_versions(f"name='{name}'")
+    if not versions:
+        raise LookupError(f"No versions of '{name}' in the MLflow registry.")
+    latest = max(versions, key=lambda v: int(v.version))
+    return latest, f"registry:{name}/v{latest.version} (unpromoted)"
+
+
+def load_from_registry(alias: Optional[str] = None) -> dict:
+    """Download and load the registered model version that should serve traffic:
+    the one aliased `config.PRODUCTION_ALIAS`, else the newest version.
 
     Raises on any failure (no tracking URI, no registered versions, network
     down, bad artifact) — the CALLER decides the fallback; see predict.py,
@@ -134,14 +179,11 @@ def load_from_registry() -> dict:
 
     name = config.REGISTERED_MODEL_NAME
     client = MlflowClient()
-    versions = client.search_model_versions(f"name='{name}'")
-    if not versions:
-        raise LookupError(f"No versions of '{name}' in the MLflow registry.")
-    latest = max(versions, key=lambda v: int(v.version))
-    local_path = mlflow.artifacts.download_artifacts(latest.source)
+    version, source = resolve_registry_version(client, name, alias)
+    local_path = mlflow.artifacts.download_artifacts(version.source)
     payload = joblib.load(local_path)
-    payload["serving_source"] = f"registry:{name}/v{latest.version}"
-    print(f"📦 Loaded '{name}' v{latest.version} from the MLflow registry.")
+    payload["serving_source"] = source
+    print(f"📦 Loaded '{name}' v{version.version} from the MLflow registry.")
     return payload
 
 

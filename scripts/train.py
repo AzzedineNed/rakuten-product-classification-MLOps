@@ -88,7 +88,18 @@ def train() -> dict:
     # Publish the saved model: attach the file to the training run and register
     # a new version in the MLflow Model Registry (best-effort, never raises).
     # The local save above already succeeded, so a failure here costs nothing.
-    classifier.register_in_mlflow(run_id)
+    # The tags are descriptive only — they say what this version IS, so a human
+    # can compare candidates. They do NOT promote it: serving follows the
+    # PRODUCTION_ALIAS, which only scripts/promote.py moves.
+    classifier.register_in_mlflow(run_id, tags={
+        "val_f1_weighted": round(metrics.get("val_f1_weighted", float("nan")), 4),
+        "classifier_type": config.CLASSIFIER_TYPE,
+        "train_samples": metrics.get("train_samples", "unknown"),
+        "backbone": config.BACKBONE_NAME,
+        # Docker creates /.dockerenv; useful because host and container runs
+        # both land in the same registry and otherwise look identical.
+        "env": "container" if os.path.exists("/.dockerenv") else "host",
+    })
 
     print(f"🎉 train.py done in {metrics['elapsed_sec']}s")
     return metrics

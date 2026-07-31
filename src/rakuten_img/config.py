@@ -131,6 +131,14 @@ MLP_HIDDEN = (256,)
 # model per modality; the text service will use its own name.
 REGISTERED_MODEL_NAME = os.getenv("RAKUTEN_REGISTERED_MODEL", "rakuten-image-classifier")
 
+# The alias that marks the version serving traffic. Promotion is an EXPLICIT,
+# human step (scripts/promote.py) — training never promotes itself, so a bad
+# run cannot become the served model just by being the most recent one.
+# predict.py resolves this alias first and falls back to the newest version if
+# nothing has been promoted yet. MLflow "stages" are deprecated in MLflow 3;
+# aliases are the supported mechanism (verified working on DagsHub).
+PRODUCTION_ALIAS = os.getenv("RAKUTEN_PRODUCTION_ALIAS", "production")
+
 # --------------------------------------------------------------------------- #
 # Cached artifacts
 # --------------------------------------------------------------------------- #

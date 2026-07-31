@@ -5,9 +5,12 @@ Image -> zoom/white-canvas preprocessing -> frozen MobileNetV2 -> classifier
 -> probability vector in CANONICAL order -> top-k labels.
 
 Model loading (registry-first, local fallback):
-  1. If MLFLOW_TRACKING_URI is set, the newest version of the registered model
+  1. If MLFLOW_TRACKING_URI is set, the registered model
      (config.REGISTERED_MODEL_NAME) is downloaded from the MLflow Model
-     Registry ONCE and cached in memory for the process lifetime.
+     Registry ONCE and cached in memory for the process lifetime. The version
+     chosen is the one carrying the config.PRODUCTION_ALIAS alias — set by
+     scripts/promote.py — or, if nothing has been promoted yet, the newest
+     version (the pre-alias behaviour).
   2. If the registry is unreachable / empty / not configured, we fall back to
      the local .joblib (config.CLASSIFIER_PATH) with the existing mtime-keyed
      cache, so a retrain on disk is still picked up automatically. Serving
