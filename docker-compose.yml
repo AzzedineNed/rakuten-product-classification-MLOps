@@ -25,6 +25,24 @@ services:
       - .env
     restart: unless-stopped
 
+    # Measured on the target machine (WSL2, 4.807 GiB available to Docker):
+    #   idle 47 MiB | serving, torch+model loaded 442 MiB | peak during a full
+    #   retrain ~1.48 GiB. The limit below is ~70% above the measured peak so a
+    #   retrain cannot be OOM-killed, while still capping a runaway process.
+    #   Re-measure with `docker stats` before lowering it.
+    mem_limit: 2.5g
+
+    # The image has no curl/wget (python:3.11-slim), so we use stdlib urllib.
+    # /health imports torch on first call, hence the tolerant timeout/retries:
+    # a slow reply during training must not flap the container to unhealthy.
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/health', timeout=8).status==200 else sys.exit(1)"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+
     # --- Optional GPU (nvidia-container-toolkit, no Docker Desktop) ---
     # Uncomment to expose your GPU. Not needed for this pipeline.
     # deploy:
@@ -45,8 +63,20 @@ services:
       # Create once with: printf "admin:$(openssl passwd -apr1)\n" > nginx/.htpasswd
       - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
     depends_on:
-      - api
+      # Wait for the API to be actually serving, not merely started, so the
+      # proxy never comes up in front of a dead upstream.
+      api:
+        condition: service_healthy
     restart: unless-stopped
+    mem_limit: 128m
+    # nginx:alpine ships busybox wget. Probing /health goes through to the API,
+    # so this checks the whole proxy -> upstream path, not just nginx itself.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 volumes:
   torch-cache:

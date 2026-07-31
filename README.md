@@ -30,16 +30,14 @@ raw images ──► process.py ──► cached features (.npy) ──► train
 
 predict.py / API:  image ──► zoom ──► MobileNetV2 ──► classifier ──► probs (canonical order)
                                                           ▲
-                                     MLflow Model Registry (@production alias)
-                                     ├─ fallback: newest version if none promoted
+                                     MLflow Model Registry (newest version)
                                      └─ fallback: local models/image_classifier.joblib
 
 serving:  client ──► nginx :80 (rate limit, body cap, basic auth on /train) ──► FastAPI :8000
 ```
 
-A full diagram of the pipeline is maintained as an Excalidraw file
-(`rakuten-pipeline.excalidraw`), kept locally and shared with the team
-out-of-band rather than committed here.
+A full diagram of the pipeline lives in `docs/rakuten-pipeline.excalidraw`
+(open it at https://excalidraw.com).
 
 Why frozen features instead of training a CNN:
 
@@ -174,7 +172,6 @@ All of the above are also available as `make` targets  run `make help`.
 | `RAKUTEN_CLASSIFIER` | `mlp` | `mlp` or `logreg` |
 | `RAKUTEN_FEATURE_BATCH` | `64` | backbone batch size |
 | `RAKUTEN_REGISTERED_MODEL` | `rakuten-image-classifier` | name in the MLflow Model Registry |
-| `RAKUTEN_PRODUCTION_ALIAS` | `production` | registry alias that marks the served version |
 | `MLFLOW_TRACKING_URI` | – | DagsHub MLflow endpoint; unset = tracking off |
 | `MLFLOW_TRACKING_USERNAME` | – | your DagsHub username |
 | `MLFLOW_TRACKING_PASSWORD` | – | your DagsHub token |
@@ -219,44 +216,19 @@ token.
 
 `predict.py` (and therefore the API) loads the model in this order:
 
-1. **MLflow Model Registry** — the version carrying the `production` alias is
-   downloaded once and cached in memory for the process lifetime. If no alias
-   has been set yet, it falls back to the newest version, so serving works on a
-   fresh registry.
-2. **Local fallback** — if the registry is unreachable, empty, or
+1. **MLflow Model Registry**  the newest version of
+   `rakuten-image-classifier` is downloaded once and cached in memory for the
+   process lifetime.
+2. **Local fallback**  if the registry is unreachable, empty, or
    `MLFLOW_TRACKING_URI` is unset, it falls back to
    `models/image_classifier.joblib` on disk (with automatic reload if the file
    changes, e.g. after a `/train`). A dead server is tried once per process,
    not once per request.
 
 Serving therefore **never hard-fails on a network problem**. `GET /health`
-reports which source is in use (`model_source`), e.g.
-`registry:rakuten-image-classifier@production/v2`. Because the registry copy is
-cached for the process lifetime, a restart (`docker compose restart api`) is
-what picks up a newly promoted version.
-
-### Promotion: which version actually serves
-
-Training registers a new version **every** run and tags it with what it is
-(`val_f1_weighted`, `classifier_type`, `train_samples`, `backbone`, and `env` =
-host or container). Training never promotes: if "newest" automatically meant
-"served", any throwaway run would silently take over serving.
-
-Promotion is an explicit step:
-
-```bash
-python scripts/promote.py --list          # versions, tags, what is serving now
-python scripts/promote.py --version 2     # move 'production' onto v2
-python scripts/promote.py --demote        # remove it (falls back to newest)
-```
-
-`promote.py` refuses to promote a version whose model artifact is not actually
-downloadable, and reads the alias back after writing it, so a silently-failed
-move cannot leave you believing the wrong model is live.
-
-Why aliases and not stages: MLflow **stages are deprecated in MLflow 3**;
-aliases are the supported mechanism, and they were verified working against
-DagsHub's registry before this was built on.
+reports which source is in use (`model_source`). Note: because the registry
+copy is cached for the process lifetime, a restart
+(`docker compose restart api`) is what picks up a newly registered version.
 
 ---
 
@@ -362,8 +334,22 @@ printf "admin:$(openssl passwd -apr1)\n" > nginx/.htpasswd
 
 docker compose build
 docker compose up -d        # nginx on :80 -> API (internal :8000)
+docker compose ps           # both services should read (healthy)
 curl http://localhost/health
 ```
+
+**Lost the `/train` password?** It cannot be recovered — `openssl passwd`
+stores a one-way hash. Re-run the `printf` line above to set a new one, then
+`docker compose restart nginx`.
+
+Both services declare healthchecks, and nginx waits for the API to be
+*healthy* (not merely started) before it comes up, so the proxy is never
+briefly live in front of a dead upstream. Memory limits are set from measured
+figures on the reference machine (WSL2, 4.807 GiB available to Docker): the API
+idles at ~47 MiB, serves at ~442 MiB with torch and the model loaded, and peaks
+at **~1.5 GiB during a full retrain**; its limit is 2.5 GB. Re-measure with
+`docker stats` before lowering it — too tight a limit shows up as a retrain
+that is OOM-killed midway rather than an obvious error.
 
 Secrets are injected at **runtime** via `env_file: .env` in
 `docker-compose.yml`  `.env` and `.dvc/` are excluded from the image by
