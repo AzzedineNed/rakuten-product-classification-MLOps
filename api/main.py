@@ -8,6 +8,15 @@ Endpoints:
                         (background task; optional ?reprocess=true to re-extract
                         features first — the heavy step)
   GET  /train/status    status + metrics of the last /train job
+  POST /evaluate        score the current local model on the cached test
+                        features and write reports/ (background task)
+  GET  /evaluate/status status + metrics of the last /evaluate job
+
+/train and /evaluate are both long-running background jobs with the same
+polling contract, so an orchestrator (Airflow) drives them the same way. They
+are mutually exclusive: /train rewrites the classifier .joblib that /evaluate
+reads, so starting either while the other runs would score a half-written file.
+Whichever is asked for second gets a 409.
 
 Run:
   uvicorn api.main:app --host 0.0.0.0 --port 8000
@@ -31,6 +40,20 @@ from rakuten_img import config
 app = FastAPI(title="Rakuten Image Classifier", version="1.0.0")
 
 _TRAIN_STATUS: dict = {"state": "idle", "detail": None, "metrics": None}
+_EVAL_STATUS: dict = {"state": "idle", "detail": None, "metrics": None}
+
+
+def _busy() -> str | None:
+    """Return the name of the job currently running, or None.
+
+    Single point of mutual exclusion for the two long jobs. Both mutate or read
+    config.CLASSIFIER_PATH, so they must never overlap.
+    """
+    if _TRAIN_STATUS["state"] == "running":
+        return "train"
+    if _EVAL_STATUS["state"] == "running":
+        return "evaluate"
+    return None
 
 
 @app.get("/health")
@@ -96,8 +119,10 @@ def train_endpoint(background_tasks: BackgroundTasks,
                    reprocess: bool = Query(False,
                        description="Re-extract features before training (slow).")):
     """Kick off retraining in the background and return immediately."""
-    if _TRAIN_STATUS["state"] == "running":
-        return JSONResponse(status_code=409, content={"error": "Training already running."})
+    running = _busy()
+    if running:
+        return JSONResponse(status_code=409,
+                            content={"error": f"A '{running}' job is already running."})
     background_tasks.add_task(_run_training, reprocess)
     return {"status": "started", "reprocess": reprocess,
             "poll": "/train/status"}
@@ -106,3 +131,43 @@ def train_endpoint(background_tasks: BackgroundTasks,
 @app.get("/train/status")
 def train_status():
     return _TRAIN_STATUS
+
+
+def _run_evaluation() -> None:
+    _EVAL_STATUS.update(state="running", detail="scoring test features", metrics=None)
+    try:
+        # Imported here, not at module level, for the same reason train/predict
+        # are: keep the idle container's memory profile small (no numpy/sklearn/
+        # matplotlib until something actually asks for them).
+        import evaluate as evaluate_script  # scripts/evaluate.py
+
+        # Call evaluate() (the library function), NOT main(): main() runs
+        # argparse on sys.argv, which under uvicorn holds the SERVER's args ->
+        # SystemExit, which `except Exception` does not catch, wedging the
+        # status on "running" forever. Same trap as process.main() above.
+        metrics = evaluate_script.evaluate()
+        _EVAL_STATUS.update(state="done", metrics=metrics, detail="completed")
+    except Exception as exc:  # noqa: BLE001
+        _EVAL_STATUS.update(state="failed", detail=str(exc))
+
+
+@app.post("/evaluate")
+def evaluate_endpoint(background_tasks: BackgroundTasks):
+    """Score the current local model on the cached test features.
+
+    Evaluates whatever classifier.load() returns — the LOCAL .joblib, i.e. the
+    model train.py last wrote — not the registry's production alias. That is
+    what an orchestrated train -> evaluate chain needs: the metrics describe the
+    model that was just trained, not the one currently being served.
+    """
+    running = _busy()
+    if running:
+        return JSONResponse(status_code=409,
+                            content={"error": f"A '{running}' job is already running."})
+    background_tasks.add_task(_run_evaluation)
+    return {"status": "started", "poll": "/evaluate/status"}
+
+
+@app.get("/evaluate/status")
+def evaluate_status():
+    return _EVAL_STATUS
