@@ -1,0 +1,207 @@
+# Airflow orchestration stack — SEPARATE from docker-compose.yml on purpose.
+#
+# Why a second compose file rather than more services in the first one:
+#   The serving stack (api + nginx) must outlive the orchestrator. Resetting a
+#   wedged scheduler or a corrupted metadata DB means `docker compose down`, and
+#   if Airflow lived in the same project that command would take the API with
+#   it. Profiles do NOT solve this: `down` removes every container in a project
+#   regardless of profile. Control plane and data plane get separate lifecycles.
+#
+# How Airflow reaches the API:
+#   As an ordinary external HTTP client, through nginx on the host's :80, with
+#   basic auth — exactly like any other caller. No docker.sock, no privileged
+#   access to the serving stack's private network, no second way in to secure.
+#   host.docker.internal is mapped via host-gateway (verified working on this
+#   machine: a container reached http://host.docker.internal/health -> 200).
+#
+# Derived from the official apache/airflow 3.3.0 docker-compose.yaml, TRIMMED:
+#   removed  redis, airflow-worker, airflow-triggerer, flower, airflow-cli
+#   because  LocalExecutor runs tasks in the scheduler (no broker, no worker),
+#            and no DAG here uses deferrable operators (no triggerer).
+#   kept     postgres, airflow-init, airflow-apiserver, airflow-scheduler,
+#            airflow-dag-processor — the minimum a working Airflow 3 needs.
+#
+# Usage (from the repo root, serving stack already up):
+#   docker compose -f docker-compose.airflow.yml up airflow-init   # once
+#   docker compose -f docker-compose.airflow.yml up -d
+#   docker compose -f docker-compose.airflow.yml ps
+#   UI: http://localhost:8080
+#
+# Teardown WITHOUT touching the serving stack:
+#   docker compose -f docker-compose.airflow.yml down
+#   (add --volumes to also drop the metadata DB and start clean)
+
+# Explicit project name. WITHOUT this, Compose derives the project from the
+# directory name, so this file would run inside the SAME project as
+# docker-compose.yml — sharing its network, and worse, making `api` and `nginx`
+# look like orphans to any `-f docker-compose.airflow.yml down --remove-orphans`,
+# which would delete them. A distinct project is what actually gives the two
+# stacks separate lifecycles; the separate file alone does not.
+name: rakuten-airflow
+
+x-airflow-common: &airflow-common
+  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:3.3.0}
+
+  # Airflow's OWN settings only. Note this deliberately does NOT read the repo
+  # root .env: the DagsHub token in there is a credential the orchestrator has
+  # no use for. Airflow gets only what it needs, from its own file.
+  env_file:
+    - ./airflow/.env.airflow
+
+  environment: &airflow-common-env
+    # LocalExecutor: tasks run as subprocesses of the scheduler. Right choice
+    # here — the DAG is strictly sequential, and Celery would add a broker plus
+    # a worker container against a 4.807 GiB total Docker ceiling.
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${FERNET_KEY:-}
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    # No example DAGs: the UI should show OUR pipeline and nothing else.
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-airflow_jwt_secret}
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
+
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/config:/opt/airflow/config
+    - ./airflow/plugins:/opt/airflow/plugins
+    # READ-ONLY view of the dataset, for existence checks ONLY. The guard tasks
+    # need to answer "does data/raw exist" and "are the .npy features cached"
+    # before deciding whether to skip the heavy steps. Read-only means Airflow
+    # can look but cannot touch: no torch, no feature extraction, no writes.
+    - ./data:/opt/airflow/rakuten-data:ro
+
+  # AIRFLOW_UID must be set in the REPO ROOT .env, not in ./airflow/.env.airflow.
+  # Compose interpolates ${...} while parsing this file, reading only the shell
+  # environment and the root .env; env_file entries are injected into the
+  # container at runtime and are invisible here. Set wrong (or unset) this
+  # silently falls back to 50000 and the bind-mounted airflow/ dirs become
+  # unwritable by you:
+  #   grep -q '^AIRFLOW_UID=' .env || echo "AIRFLOW_UID=$(id -u)" >> .env
+  user: "${AIRFLOW_UID:-50000}:0"
+
+  # Lets tasks reach the serving stack through nginx on the host.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+  depends_on: &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: rakuten-airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    # PROVISIONAL — see the note at the bottom of this file.
+    mem_limit: 512m
+
+  # Runs once: DB migration + admin user creation, then exits 0.
+  airflow-init:
+    <<: *airflow-common
+    container_name: rakuten-airflow-init
+    # Own volume list, WITHOUT the read-only ./data mount: init has no reason to
+    # see the dataset, and mounting it here means the chown below has to walk
+    # 100k+ image files it cannot (and must not) modify.
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/config:/opt/airflow/config
+      - ./airflow/plugins:/opt/airflow/plugins
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /opt/airflow/{logs,dags,plugins,config}
+        /entrypoint airflow version
+        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins /opt/airflow/config
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+    user: "0:0"
+
+  airflow-apiserver:
+    <<: *airflow-common
+    container_name: rakuten-airflow-apiserver
+    command: api-server
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+    mem_limit: 1g
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: rakuten-airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+    # Under LocalExecutor the DAG's tasks run HERE. They only make HTTP calls
+    # and stat() a few paths, so this stays small — the heavy lifting happens
+    # in the api container, which has its own 2.5g limit.
+    mem_limit: 1g
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    container_name: rakuten-airflow-dag-processor
+    command: dag-processor
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+    mem_limit: 768m
+
+volumes:
+  postgres-db-volume:
+
+# MEMORY LIMITS ABOVE ARE PROVISIONAL, NOT MEASURED.
+# Every other limit in this repo came from `docker stats` on the target machine.
+# These did not — this stack has never been run here. They are starting caps
+# chosen to be generous enough not to OOM during first boot, and they MUST be
+# re-measured and tightened before this is treated as settled. Note the totals:
+# limits are caps, not reservations, so the sum exceeding the 4.807 GiB Docker
+# ceiling is expected; what matters is measured concurrent usage, especially
+# while the api container is at its ~1.48 GiB training peak.
