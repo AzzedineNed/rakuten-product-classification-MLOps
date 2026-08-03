@@ -55,3 +55,17 @@ logs/
 .env
 .env.local
 
+# Environnement virtuel
+venv_rakuten/
+venv/
+.venv/
+
+# Modèles lourds
+*.safetensors
+*.bin
+*.pt
+*.pth
+camembert_text_model/
+
+# Fichiers de données volumineux
+*.csv

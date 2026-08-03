@@ -27,3 +27,8 @@ notebook>=6.5.0
 ipykernel>=6.20.0
 joblib>=1.2.0  # Pour sauvegarder les modèles
 
+# API REST (déploiement du modèle)
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+pydantic>=2.0.0
+
