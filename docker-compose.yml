@@ -9,6 +9,10 @@ services:
     #   - "8000:8000"
     expose:
       - "8000"
+    # Explicit per-service command: one image serves all three services, so the
+    # Dockerfile CMD is only a default. Being explicit here means the compose
+    # file alone tells you what each container runs.
+    command: ["uvicorn", "api.image_main:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
       # Persist data, trained models and reports on the host.
       - ./data:/app/data
@@ -53,6 +57,69 @@ services:
     #           count: 1
     #           capabilities: [gpu]
 
+  text-api:
+    build: .
+    image: rakuten-image-mlops:latest
+    container_name: rakuten-text-api
+    expose:
+      - "8001"
+    command: ["uvicorn", "api.text_main:app", "--host", "0.0.0.0", "--port", "8001"]
+    volumes:
+      # READ-ONLY: this service only ever loads the two .pkl files. It has no
+      # training endpoint, so it has no business writing to models/.
+      - ./models:/app/models:ro
+    restart: unless-stopped
+
+    # PROVISIONAL — NOT MEASURED. The artifacts are tiny (0.5 MB vectorizer +
+    # 2.2 MB estimator) but scikit-learn and scipy are not. Confirm with
+    # `docker stats` and tighten.
+    mem_limit: 1g
+
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8001/health', timeout=8).status==200 else sys.exit(1)"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+
+  gateway:
+    build: .
+    image: rakuten-image-mlops:latest
+    container_name: rakuten-gateway
+    expose:
+      - "8002"
+    command: ["uvicorn", "api.gateway_main:app", "--host", "0.0.0.0", "--port", "8002"]
+    environment:
+      # Service names on the compose network, not localhost.
+      - RAKUTEN_IMAGE_API_URL=http://api:8000
+      - RAKUTEN_TEXT_API_URL=http://text-api:8001
+    # No volumes: the gateway owns no model and reads no data. It is a
+    # coordinator that calls the other two over HTTP.
+    depends_on:
+      # Wait for both upstreams to be SERVING, not merely started, so the
+      # gateway never comes up in front of dead backends.
+      api:
+        condition: service_healthy
+      text-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+    # PROVISIONAL — NOT MEASURED. Should be the smallest of the three: numpy,
+    # requests and FastAPI, no model, no torch.
+    mem_limit: 512m
+
+    healthcheck:
+      # /health is deliberately 200 even when an upstream is down (the gateway
+      # itself is fine and can still serve single-modality predictions), so
+      # this probes the gateway, not the backends.
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8002/health', timeout=8).status==200 else sys.exit(1)"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+
   nginx:
     image: nginx:1.27-alpine
     container_name: rakuten-nginx
@@ -63,9 +130,14 @@ services:
       # Create once with: printf "admin:$(openssl passwd -apr1)\n" > nginx/.htpasswd
       - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
     depends_on:
-      # Wait for the API to be actually serving, not merely started, so the
-      # proxy never comes up in front of a dead upstream.
+      # Wait for every upstream to be actually serving, not merely started, so
+      # the proxy never comes up in front of a dead backend. nginx resolves all
+      # three upstream names at startup and refuses to boot if one is missing.
       api:
+        condition: service_healthy
+      text-api:
+        condition: service_healthy
+      gateway:
         condition: service_healthy
     restart: unless-stopped
     mem_limit: 128m
