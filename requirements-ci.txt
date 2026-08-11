@@ -1,0 +1,40 @@
+# ---------------------------------------------------------------------------
+# CI test dependencies — a deliberate SUBSET of requirements.txt.
+#
+# The 27-test suite is torch-free, mlflow-free and data-free: every import of
+# torch / mlflow / requests / tqdm / dotenv inside src/ is lazy (inside a
+# function or a try/except), so none of them is needed to import and test
+# rakuten_common / rakuten_img / rakuten_text.
+#
+# Omitted on purpose (installed by requirements.txt, never touched by tests):
+#   mlflow, dagshub, dvc, dvc-http     -> tracking & data versioning
+#   fastapi, uvicorn, python-multipart -> the API layer; no test imports api/
+#   torch, torchvision                 -> not in requirements.txt at all
+#
+# MEASURED: full requirements.txt = 128s / 192 packages / 995 MB.
+#           this subset            =  65s /  ~30 packages / 467 MB.
+#
+# EVERY PIN HERE MUST MATCH requirements.txt EXACTLY.
+# scripts/check_ci_pins.py enforces that and CI runs it before installing.
+#
+# scikit-learn==1.4.2 is LOAD-BEARING, not cosmetic: rakuten_img.classifier
+# passes multi_class= to LogisticRegression, which was removed in newer
+# scikit-learn. On 1.9.0 the suite fails with
+#   TypeError: LogisticRegression.__init__() got an unexpected keyword
+#   argument 'multi_class'
+# in tests/test_pipeline.py::test_classifier_roundtrip_and_reorder.
+# Unpinning this turns CI red. Fix the source first, then move the pin.
+# ---------------------------------------------------------------------------
+
+numpy==1.26.4
+pandas==2.2.2
+pillow==10.3.0
+scikit-learn==1.4.2
+joblib==1.4.2
+tqdm==4.66.4
+matplotlib==3.8.4
+requests==2.31.0
+python-dotenv==1.0.1
+
+# Dev / tests
+pytest==8.2.0

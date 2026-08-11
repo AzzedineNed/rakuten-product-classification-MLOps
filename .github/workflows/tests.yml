@@ -1,0 +1,55 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push to the same branch cancels the older, still-running job.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: pytest (python 3.12, pinned)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # 3.12 matches the .venv on the dev machine. requirements.txt says
+      # 3.10/3.11 are "recommended", but the pipeline is developed and run on
+      # 3.12, so that is what CI must prove.
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      # Runs BEFORE the install: a drifted pin should fail in 2 seconds, not
+      # after a 65-second install of the wrong versions.
+      - name: Check CI pins against requirements.txt
+        run: python scripts/check_ci_pins.py
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      # Printed so a failing run tells you which versions produced it without
+      # having to re-run anything.
+      - name: Report resolved versions
+        run: |
+          python -c "import sklearn, numpy, pandas, PIL; print('scikit-learn', sklearn.__version__); print('numpy       ', numpy.__version__); print('pandas      ', pandas.__version__); print('pillow      ', PIL.__version__)"
+
+      # No PYTHONPATH needed: tests/conftest.py puts src/ on sys.path.
+      # No dataset, no DVC pull, no MLflow credentials — the suite is
+      # deliberately data-free and network-free.
+      - name: Run tests
+        run: pytest tests/ -q --durations=5
