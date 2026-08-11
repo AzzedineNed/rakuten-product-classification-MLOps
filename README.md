@@ -1,55 +1,100 @@
-# Rakuten Product Classification  Image modality (MLOps)
+# Rakuten Product Classification — MLOps (image + text + fusion)
 
-This repository holds the **image** half of our group's *Rakuten France
+This repository holds the **MLOps phase** of our group's *Rakuten France
 Multimodal Product Data Classification* project (ENS Challenge Data #35). It
-predicts a product `prdtypecode` (27 classes) from a product image.
+predicts a product `prdtypecode` (27 classes) from a product **image**, from its
+**text** (designation + description), or from **both** via late fusion.
 
-> **Where this fits in the bigger project.** The full project is *multimodal*:
-> an **image** model (this repo), a **text** model (CamemBERT), and a **fusion**
-> step that combines the two. This repo is the image part only. The text model
-> and fusion are owned by the rest of the team  see
-> [Text modality & fusion](#text-modality--fusion-planned) for how this part
-> plugs into them.
+![Architecture](docs/architecture.png)
+
+*Source: [`docs/architecture.excalidraw`](docs/architecture.excalidraw) — open it
+at [excalidraw.com](https://excalidraw.com) and re-export the PNG after any
+change.*
 
 This is a deliberately **lighter re-implementation** of the modelisation work
 (which trained LeNet / VGG16 / EfficientNetB3 on a rented H100). Instead of
-training a heavy CNN, it uses a **frozen MobileNetV2 backbone as a feature
-extractor** and trains a small scikit-learn classifier on the cached feature
-vectors. That choice is what makes the whole thing run on a modest laptop and
-makes the `/train` endpoint return in seconds.
+training a heavy CNN it uses a **frozen MobileNetV2 backbone as a feature
+extractor** with a small scikit-learn head, and a **TF-IDF + LogisticRegression**
+text model. That choice is what makes the whole thing run on a modest laptop
+(2 cores, 8 GB RAM) and makes the `/train` endpoint return in seconds.
+
+The deliverable is a **working, reproducible, observable pipeline** — not a new
+SOTA score.
 
 ---
 
-## Architecture
+## Results (measured, not estimated)
+
+All figures come from the shared held-out **test** split (8492 products the
+models never saw), except the image number, which is the val figure recorded in
+the registry.
+
+| model | accuracy | f1_weighted | f1_macro |
+|---|---|---|---|
+| image (MobileNetV2 + MLP head) | – | **0.5468** *(val)* | – |
+| text (TF-IDF + LogReg) | 0.7768 | **0.7780** | 0.7564 |
+| **fusion @ text_weight 0.85** | **0.7990** | **0.7973** | 0.7794 |
+
+Fusion beats text alone by **+0.0193 weighted F1**.
+
+### The fusion weight was measured, not guessed
+
+`scripts/tune_fusion_weight.py` sweeps the weight on the **val** split:
+
+| text_weight | f1_weighted | |
+|---|---|---|
+| 0.00 | 0.5468 | endpoint check — must equal image alone |
+| 0.50 | 0.6621 | the old default: **worse than text alone**, silently |
+| **0.85** | **0.7945** | chosen |
+| 1.00 | 0.7818 | endpoint check — must equal text alone |
+
+The curve is flat between 0.80 and 0.90, so 0.85 is not a knife-edge fit, and
+test came out *above* val, so it did not overfit val. The two endpoint checks are
+printed on every sweep: if weight 0.0 does not reproduce the image model exactly
+and 1.0 does not reproduce the text model exactly, the fusion code is wrong and
+the curve means nothing.
+
+Weakest text classes by F1: `1180 Jeux de table` 0.40, `10 Livre usagé` 0.50,
+`1280 Jouets enfants` 0.57. Strongest: `2905 Jeux pour PC` 1.00,
+`2583 Équipement de piscine` 0.95, `1920 Mobilier` 0.91.
+
+---
+
+## The shared split, and why it matters
+
+Both modalities are trained and scored on **one** 80/10/10 stratified split,
+produced by `src/rakuten_common/split.py` and keyed by **row label**, not
+position:
 
 ```
-raw images ──► process.py ──► cached features (.npy) ──► train.py ──► image_classifier.joblib
-                  │                                          │              │
-        zoom + MobileNetV2                          small MLP / logreg      ├──► MLflow run (params + metrics)
-        (frozen, no backprop)                       (fast, re-runnable)     └──► Model Registry (new version)
-
-predict.py / API:  image ──► zoom ──► MobileNetV2 ──► classifier ──► probs (canonical order)
-                                                          ▲
-                                     MLflow Model Registry (newest version)
-                                     └─ fallback: local models/image_classifier.joblib
-
-serving:  client ──► nginx :80 (rate limit, body cap, basic auth on /train) ──► FastAPI :8000
+train 67932   val 8492   test 8492
 ```
 
-A full diagram of the pipeline lives in `docs/rakuten-pipeline.excalidraw`
-(open it at https://excalidraw.com).
+This is not a detail. Before it existed, the text model's 80/20 validation set
+was **exactly the image pipeline's val + test blocks combined** (8492 + 8492 =
+16984 rows) — text was being scored on rows the image pipeline held out, so the
+two numbers were never comparable and fusion could not be evaluated honestly.
 
-Why frozen features instead of training a CNN:
+Guarantees now enforced in code:
 
-- **Runs on a laptop.** The only heavy step is one forward pass over the
-  ~84k images during `process.py`; after that everything is small-matrix math.
-- **`/train` is actually usable.** Retraining the classifier head on cached
-  features takes seconds, so a live `/train` endpoint is realistic (retraining
-  a full CNN over HTTP would time out).
-- **Reasonable accuracy.** Frozen MobileNetV2 features + an MLP head give a
-  respectable weighted-F1  below the EfficientNetB3 result from modelisation,
-  which is expected and fine: the deliverable is a working reproducible
-  pipeline, not a new SOTA score.
+- **No leakage.** The TF-IDF vectorizer is fit on the 67932 training rows only.
+- **Guarded merge.** Modalities are merged on the ID column with a row-count
+  guard and a duplicate-id check, never by row position.
+- **Fingerprints.** `models/text/split.json` stores a SHA-256 of all three
+  splits; `rakuten_text/evaluate.py` verifies **all three** before scoring, so a
+  change confined to training rows cannot pass unnoticed.
+- **Proof, not assertion.** `scripts/check_split.py` demonstrates on the real
+  data that the shared module reproduces `rakuten_img.data.split_dataframe`
+  exactly — identical index, order and membership, 27 classes in each split.
+
+### Canonical class order (the fusion contract)
+
+> Every probability vector produced anywhere in this repo is ordered by
+> `config.CANONICAL_CLASSES` — the 27 `prdtypecode`s sorted **numerically**.
+
+Verified at train time (training aborts if `classes_` disagrees) and at predict
+time. The fusion gateway **refuses to fuse** if an upstream reports a different
+order. `tests/test_contract.py` covers this.
 
 ---
 
@@ -57,40 +102,42 @@ Why frozen features instead of training a CNN:
 
 ```
 rakuten-image-mlops/
-├── data/raw/            # collect.py lands raw data here (gitignored, DVC-tracked)
-├── data/processed/      # process.py caches feature .npy + meta here (gitignored)
-├── models/              # trained classifier: image_classifier.joblib (DVC-tracked)
-├── reports/             # evaluate.py writes metrics / report / confusion matrix
-├── src/rakuten_img/     # the package  all logic lives here
-│   ├── config.py        # paths, labels, CANONICAL class order, constants, run_params()
-│   ├── images.py        # zoom / white-canvas preprocessing
-│   ├── data.py          # load/merge, split, resample
-│   ├── backbone.py      # frozen MobileNetV2 (only module importing torch)
-│   ├── classifier.py    # build / save / load the head, registry publish/pull, reorder
-│   ├── ens_download.py  # authenticated download from ENS (used by --from-ens)
-│   └── fusion.py        # late-fusion helper (documents the team contract; inert)
-├── scripts/             # thin CLI entrypoints over the package
-│   ├── _bootstrap.py    # makes src/ importable so scripts "just run"
+├── data/raw/                  # collect.py lands raw data here (gitignored, DVC-tracked)
+├── data/processed/            # cached feature .npy + meta (gitignored)
+├── models/                    # image_classifier.joblib + models/text/ (DVC-tracked)
+├── reports/                   # metrics, classification reports, confusion matrices
+├── docs/architecture.*        # the diagram above (source + exported PNG)
+│
+├── src/rakuten_common/        # modality-agnostic: no torch, no estimators
+│   ├── split.py               # THE split: load, split, split_labels
+│   ├── contract.py            # to_canonical(), validate_vector()
+│   ├── features.py            # cached-feature row -> productid mapping, re-verified
+│   └── fusion.py              # weighted_average(), DEFAULT_TEXT_WEIGHT = 0.85
+├── src/rakuten_img/           # image modality
+│   ├── config.py  images.py  data.py
+│   ├── backbone.py            # frozen MobileNetV2 (the only module importing torch)
+│   ├── classifier.py          # build/save/load head, registry publish/pull, reorder
+│   └── ens_download.py
+├── src/rakuten_text/          # text modality
+│   ├── config.py  preprocessing.py  predict.py
+│   ├── train.py  evaluate.py  tracking.py
+│
+├── scripts/                   # thin CLI entrypoints over the packages
 │   ├── collect.py  process.py  train.py  evaluate.py  predict.py
-├── api/image_main.py    # FastAPI (image): /predict, /train, /train/status, /health
-├── api/text_main.py     # FastAPI (text):  /predict, /predict/batch, /health
-├── nginx/default.conf   # reverse proxy: rate limits, body cap, auth on /train
-├── tests/               # torch-free smoke tests
-├── .dvc/                # DVC config (remote = DagsHub); token in config.local (gitignored)
-├── data/raw.dvc  models.dvc   # DVC pointers (committed; the data itself is not)
-├── .env.example         # copy to .env for ENS + DagsHub/MLflow credentials (gitignored)
-├── requirements.txt  Dockerfile  docker-compose.yml  Makefile
+│   ├── promote.py             # the ONLY thing that moves the production alias
+│   ├── check_split.py         # proves the shared split matches the image split
+│   ├── tune_fusion_weight.py  # measures the fusion weight
+│   └── check_ci_pins.py       # requirements-ci.txt must not drift
+│
+├── api/image_main.py          # FastAPI :8000  /predict /train /evaluate /health
+├── api/text_main.py           # FastAPI :8001  /predict /predict/batch /health
+├── api/gateway_main.py        # FastAPI :8002  /predict (fusion) /health
+├── nginx/default.conf         # the only public entrypoint
+├── airflow/dags/              # rakuten_image_pipeline
+├── .github/workflows/tests.yml
+├── tests/                     # 27 tests, torch-free and data-free
+└── requirements.txt  requirements-ci.txt  Dockerfile  docker-compose*.yml  Makefile
 ```
-
-The five scripts are thin wrappers; the importable logic lives in
-`src/rakuten_img/`. That's what makes everything reusable and lets the API and
-the CLI share identical preprocessing and class order.
-
-> **Repository layout note (TBD, team).** The image code currently lives at the
-> repository root. If/when the text model is added to this same repo, the team
-> may move to a multi-part layout (e.g. `image/`, `text/`, `fusion/`) with a
-> top-level project README. That restructure is not done yet  this README
-> documents the repo as it stands today.
 
 ---
 
@@ -99,7 +146,6 @@ the CLI share identical preprocessing and class order.
 PyTorch is installed separately because the correct wheel is hardware-specific.
 
 ```bash
-# from the project root, inside WSL2
 make setup            # creates .venv, installs CPU torch + requirements
 # or manually:
 python3 -m venv .venv && source .venv/bin/activate
@@ -110,57 +156,169 @@ pip install -r requirements.txt
 Run the tests (need neither torch nor data):
 
 ```bash
-make test
+make test             # 27 tests
 ```
 
-> On the GPU: a 2 GB laptop GPU (e.g. GeForce 940MX) brings little benefit here
-> and CUDA setup is often more trouble than it's worth. CPU is the recommended
-> default. If `torch.cuda.is_available()` is true the backbone uses it
-> automatically  no code change needed.
+> **Pins are load-bearing.** `numpy` stays `<2` because torch 2.2.2 requires it,
+> and `scikit-learn==1.4.2` is required because `classifier.py` passes
+> `multi_class=` to `LogisticRegression`, which newer versions removed. On
+> scikit-learn 1.9 the suite fails with `TypeError: ... unexpected keyword
+> argument 'multi_class'`. Fix the source before moving that pin.
 
 ---
 
 ## Usage
 
-The scripts run in order. Each has a clear, reusable role.
+### Image pipeline
 
 ```bash
 # 1. Acquire raw data into data/raw/ (idempotent; re-runs are no-ops)
-#  (a) from a local folder or zip you already have:
-python scripts/collect.py --source /path/to/rakuten/data
-python scripts/collect.py --source /path/to/rakuten.zip
-#  (b) OR download straight from challengedata.ens.fr (authenticated):
-cp .env.example .env        # then set ENS_USERNAME / ENS_PASSWORD in .env
-python scripts/collect.py --from-ens
-#  (c) OR, for teammates: pull the exact versioned data from DagsHub via DVC:
-dvc pull                    # needs your DagsHub token in .dvc/config.local
-#    Credentials are read from .env (gitignored), never logged or committed.
-#    Source-download lands ~2.2 GB in data/raw/ (reproducibility, not disk saving).
+python scripts/collect.py --source /path/to/rakuten/data      # local folder or .zip
+python scripts/collect.py --from-ens                          # authenticated ENS download
+dvc pull                                                      # or: the exact versioned data
 
-# 2. Extract & cache MobileNetV2 features for train/val/test (the long step)
+# 2. Extract & cache MobileNetV2 features (the long step; resumable)
 python scripts/process.py
-#    quick smoke run on a subset:
-python scripts/process.py --limit 540
-#    Raw features are saved to disk as soon as each split is extracted, so the
-#    expensive pass is never lost. If interrupted, just rerun  it resumes by
-#    skipping any split whose raw features are already cached.
+python scripts/process.py --limit 540      # quick smoke run
 
-# 3. Train the classifier head on cached features (fast)
+# 3. Train the head on cached features (fast)
 python scripts/train.py
-#    switch to logistic regression:
 RAKUTEN_CLASSIFIER=logreg python scripts/train.py
-#    With MLflow configured (see below) this logs the run to DagsHub AND
-#    registers the model as a new version in the MLflow Model Registry.
 
-# 4. Evaluate on the test set -> reports/  (+ attaches test metrics and the
-#    confusion matrix to the SAME MLflow run as the training)
+# 4. Evaluate -> reports/ (+ attaches test metrics to the SAME MLflow run)
 python scripts/evaluate.py
 
-# 5. Predict on a new image (pulls the model from the registry; see Serving)
+# 5. Predict on a new image
 python scripts/predict.py --image path/to/product.jpg --top-k 5
 ```
 
-All of the above are also available as `make` targets  run `make help`.
+### Text pipeline
+
+```bash
+PYTHONPATH=src python -m rakuten_text.train                   # ~3 min on 2 cores
+PYTHONPATH=src python -m rakuten_text.evaluate                # scores the TEST split, ~20s
+PYTHONPATH=src python -m rakuten_text.evaluate --split val    # re-score val
+```
+
+`--max-features` is the only training flag. `--test-size` and `--full` were
+removed deliberately: a flag that cannot change the shared split is a lie.
+
+### Fusion
+
+```bash
+python scripts/tune_fusion_weight.py        # sweeps the weight on val, ~19s
+```
+
+All of the above are also `make` targets — run `make help`.
+
+---
+
+## Serving: three services behind one proxy
+
+Nginx on **:80** is the only public entrypoint. **No service publishes a host
+port.** The prefix is stripped by the trailing slash on both the `location` and
+the `proxy_pass` target.
+
+| route | goes to | notes |
+|---|---|---|
+| `/` `/predict` `/train` `/evaluate` | image service | unchanged legacy paths; the Airflow DAG drives these |
+| `/text/…` | text service | prefix stripped |
+| `/fusion/…` | gateway | prefix stripped; fans out to both services |
+
+`/text` and `/fusion` without the trailing slash 301-redirect to the slashed
+form. Basic auth guards `/train`, `/train/status`, `/evaluate`,
+`/evaluate/status`. Rate limits are per-IP: 10r/s general (burst 20), 1r/s on
+train (burst 5), `limit_req_status 429`. Body cap 10 MB.
+
+```bash
+curl -s -F "file=@product.jpg" "http://localhost/predict?top_k=3"
+curl -s -X POST -H "Content-Type: application/json" \
+     -d '{"designation":"Zzz","description":"..."}' "http://localhost/text/predict"
+curl -s -F "file=@product.jpg" -F "designation=Zzz" "http://localhost/fusion/predict"
+```
+
+The gateway owns no model. It calls both services over HTTP, checks their
+declared class order, and fuses at 0.85. If one upstream fails it returns the
+other with `degraded=true` plus an `errors` block; if both fail, 502.
+
+### Model loading order
+
+1. **MLflow Model Registry, alias first** — the version carrying the
+   `production` alias.
+2. **Newest registered version**, labelled `(unpromoted)`, if no alias resolves.
+3. **Local `models/image_classifier.joblib`** if the registry is unreachable or
+   tracking is unset.
+
+Serving never hard-fails on a network problem. **Training never promotes** — the
+`production` alias moves only via `scripts/promote.py`. Because the registry copy
+is cached for the process lifetime, `docker compose restart api` is what picks up
+a newly promoted version.
+
+---
+
+## Docker
+
+Four containers: three FastAPI services (all from the **same image**, with
+per-service `command:` overrides) plus nginx.
+
+```bash
+# one-time: create the basic-auth file (gitignored)
+printf "admin:$(openssl passwd -apr1)\n" > nginx/.htpasswd
+
+docker compose build
+docker compose up -d
+docker compose ps           # all four should read (healthy)
+curl http://localhost/health
+curl http://localhost/text/health
+curl http://localhost/fusion/health
+```
+
+Nginx waits for all three services to be *healthy*, not merely started. Memory
+limits, measured with `docker stats` during a live fusion request:
+
+| container | measured | limit |
+|---|---|---|
+| rakuten-image-api | 120 MiB idle / 389 MiB serving / ~1.5 GiB retraining | 2.5g |
+| rakuten-text-api | 157 MiB | 1g |
+| rakuten-gateway | 50 MiB | 512m |
+| rakuten-nginx | 5.3 MiB | 128m |
+
+All eight containers including the Airflow stack total ~1.04 GiB against a
+4.807 GiB WSL2 ceiling. The text and gateway limits are generous rather than
+tight; re-measure before lowering. Too tight a limit shows up as a retrain
+OOM-killed midway, not an obvious error.
+
+Secrets are injected at **runtime** via `env_file: .env`; `.env` and `.dvc/` are
+excluded by `.dockerignore`, so credentials are never baked into image layers.
+
+> ⚠️ **Nginx does not reload a bind-mounted config.** After editing
+> `nginx/default.conf` you **must** run `docker compose restart nginx`. The tell
+> that you forgot: `/text/health` returns FastAPI's `{"detail":"Not Found"}` —
+> a 404 *body* means you reached a FastAPI app, just the wrong one.
+
+---
+
+## Experiment tracking & data versioning (DagsHub)
+
+One account token drives three things:
+
+- **MLflow tracking** — `train.py` logs params and train/val metrics;
+  `evaluate.py` reopens the **same run** (the run_id is stored in the saved model
+  payload) and attaches test metrics, the classification report and the confusion
+  matrix. One run tells the full story. Both modalities do this.
+- **Model Registry** — two registered models: `rakuten-image-classifier`
+  (`production` → v2, six versions) and `rakuten-text-classifier` (v1, no alias
+  yet). Adding the text model did not move image serving at all.
+- **DVC** — `data/raw` and `models` are tracked and pushed to the DagsHub remote
+  over HTTP. Pointer files are committed; the data never is.
+
+Everything is **best-effort by design**: if `MLFLOW_TRACKING_URI` is unset or the
+server is unreachable, training and evaluation run normally and the model is
+still saved locally. Tracking never blocks the pipeline.
+
+**Teammate setup:** create a DagsHub account, grab your token, put it in `.env`
+(as `MLFLOW_TRACKING_PASSWORD`) *and* `.dvc/config.local` (as the DVC password).
+Both files are gitignored. Each person uses their own token.
 
 ### Configuration (env vars)
 
@@ -168,221 +326,108 @@ All of the above are also available as `make` targets  run `make help`.
 |---|---|---|
 | `RAKUTEN_RAW_SOURCE` | – | default `--source` for collect.py |
 | `RAKUTEN_DATA_DIR` | `./data` | data root |
-| `RAKUTEN_MODELS_DIR` | `./models` | where the classifier is saved |
+| `RAKUTEN_MODELS_DIR` | `./models` | where classifiers are saved |
 | `RAKUTEN_REPORTS_DIR` | `./reports` | where evaluate.py writes results |
-| `RAKUTEN_CLASSIFIER` | `mlp` | `mlp` or `logreg` |
+| `RAKUTEN_CLASSIFIER` | `mlp` | `mlp` or `logreg` (image head) |
 | `RAKUTEN_FEATURE_BATCH` | `64` | backbone batch size |
-| `RAKUTEN_REGISTERED_MODEL` | `rakuten-image-classifier` | name in the MLflow Model Registry |
+| `RAKUTEN_REGISTERED_MODEL` | `rakuten-image-classifier` | registry name (image) |
+| `RAKUTEN_PRODUCTION_ALIAS` | `production` | alias consulted first when serving |
 | `MLFLOW_TRACKING_URI` | – | DagsHub MLflow endpoint; unset = tracking off |
-| `MLFLOW_TRACKING_USERNAME` | – | your DagsHub username |
-| `MLFLOW_TRACKING_PASSWORD` | – | your DagsHub token |
-| `MLFLOW_EXPERIMENT_NAME` | `rakuten-image` | MLflow experiment to log under |
-| `ENS_USERNAME` / `ENS_PASSWORD` | – | credentials for `collect.py --from-ens` (put in `.env`) |
+| `MLFLOW_TRACKING_USERNAME` / `_PASSWORD` | – | DagsHub username / token |
+| `MLFLOW_EXPERIMENT_NAME` | `rakuten-image` | experiment for the image runs |
+| `ENS_USERNAME` / `ENS_PASSWORD` | – | credentials for `collect.py --from-ens` |
 | `ENS_BASE` | `https://challengedata.ens.fr` | ENS site base URL |
 | `ENS_CHALLENGE_ID` | `35` | ENS challenge number |
 
-These can go in a local `.env` file (auto-loaded) or be exported in the shell.
-A real exported variable takes precedence over the same key in `.env`.
+Text artifacts go to `models/text/` and `reports/text/`; the text experiment is
+`rakuten-text`. A real exported variable takes precedence over `.env`.
 
 ---
 
-## Experiment tracking & data versioning (DagsHub)
+## Orchestration (Airflow)
 
-The repo is connected to DagsHub, which hosts three things off one account
-token:
-
-- **MLflow tracking.** `train.py` logs each run's parameters and train/val
-  metrics; `evaluate.py` reopens the **same run** (the run_id is stored inside
-  the saved model payload) and attaches test metrics, the classification
-  report and the confusion matrix  so one run tells the full story.
-- **MLflow Model Registry.** `train.py` registers every trained model as a new
-  version of `rakuten-image-classifier`. This is what serving pulls from (see
-  next section).
-- **DVC.** `data/raw` and `models` are DVC-tracked and pushed to the DagsHub
-  DVC remote over HTTP. The `.dvc` pointer files are committed; the data
-  itself never is.
-
-Everything is **best-effort by design**: if `MLFLOW_TRACKING_URI` is unset or
-the server is unreachable, training/evaluation run normally and the model is
-still saved locally  tracking never blocks the pipeline.
-
-**Teammate setup:** create a DagsHub account, grab your token, then put it in
-two places  `.env` (as `MLFLOW_TRACKING_PASSWORD`) and `.dvc/config.local`
-(as the DVC password; this file is gitignored). Each person uses their own
-token.
-
----
-
-## Model serving: registry first, local fallback
-
-`predict.py` (and therefore the API) loads the model in this order:
-
-1. **MLflow Model Registry**  the newest version of
-   `rakuten-image-classifier` is downloaded once and cached in memory for the
-   process lifetime.
-2. **Local fallback**  if the registry is unreachable, empty, or
-   `MLFLOW_TRACKING_URI` is unset, it falls back to
-   `models/image_classifier.joblib` on disk (with automatic reload if the file
-   changes, e.g. after a `/train`). A dead server is tried once per process,
-   not once per request.
-
-Serving therefore **never hard-fails on a network problem**. `GET /health`
-reports which source is in use (`model_source`). Note: because the registry
-copy is cached for the process lifetime, a restart
-(`docker compose restart api`) is what picks up a newly registered version.
-
----
-
-## API
-
-In Docker the API sits **behind nginx** and is reached on port **80**; the
-API container itself is not published to the host. For local development
-without Docker, `make serve` still runs uvicorn directly on `:8000`.
+Airflow runs as a **separate compose project** (`rakuten-airflow`, Airflow 3.3.0,
+LocalExecutor) and talks to the API **over HTTP through nginx** with basic auth —
+it does not import the pipeline code.
 
 ```bash
-make serve     # dev only: uvicorn api.image_main:app on http://localhost:8000
+# .env.airflow must set AIRFLOW_UID to your host uid, or the containers
+# write root-owned files into airflow/logs/ that you then cannot delete
+echo "AIRFLOW_UID=$(id -u)" >> airflow/.env.airflow
+
+docker compose -f docker-compose.yml up -d                    # the services
+docker compose -f docker-compose.airflow.yml up -d            # the scheduler stack
 ```
 
-`POST /predict`  multipart image upload (open, rate-limited):
+DAG `rakuten_image_pipeline`: `collect_guard >> process_guard >> train >> evaluate`,
+`schedule=None`, `retries=0`, `max_active_runs=1`. A full run takes **~1015s**.
+It registers a new model version and **never promotes**.
 
-```bash
-curl -s -F "file=@product.jpg" "http://localhost/predict?top_k=3"
-```
+> The dag-processor refresh interval is the default **300s**, so a new or edited
+> DAG can take up to five minutes to appear.
 
-Returns the top-k classes, the single best prediction, **and** the full
-probability vector together with `canonical_classes` so a fusion layer can
-consume it directly.
-
-`POST /train`  retrain the classifier head (background). **Behind basic auth**
-in the Docker setup:
-
-```bash
-curl -s -X POST -u admin:<password> "http://localhost/train"                  # classifier only (fast)
-curl -s -X POST -u admin:<password> "http://localhost/train?reprocess=true"   # re-extract features first (slow)
-curl -s -u admin:<password> "http://localhost/train/status"                   # poll progress + metrics
-```
-
-`GET /health`  liveness, whether a trained model is present, and where the
-served model came from (`model_source`: registry vs local).
+> ⚠️ **Airflow covers the image modality only.** Text is not orchestrated: the
+> text service has no `/train` endpoint, so retraining text is a host-side
+> command. Extending the DAG means first deciding whether orchestration drives an
+> endpoint (which must be built) or a container command.
 
 ---
 
-## Fusion contract
+## CI
 
-Fusion lives at the team level, not inside this pipeline, but this repo honors
-the contract that makes it trivial:
+`.github/workflows/tests.yml` runs the 27 tests on every push and pull request to
+`main`, on Python 3.12, in **~35s**.
 
-> Every probability vector produced here is ordered by
-> `config.CANONICAL_CLASSES`  the 27 `prdtypecode`s sorted **numerically**.
+CI installs `requirements-ci.txt` — a deliberate **subset** of
+`requirements.txt` that omits mlflow, dagshub, dvc and the API stack, none of
+which the tests import (every such import in `src/` is lazy). Measured: 128s and
+995 MB for the full file versus 65s and 467 MB for the subset.
 
-If the text model (CamemBERT) emits its probabilities in the same order, fusion
-is a weighted average (`src/rakuten_img/fusion.py`). The `/predict` response
-already exposes both the ordered class list and the full probability vector for
-this purpose.
-
----
-
-## Text modality & fusion (planned)
-
-> **Status: not in this repo yet. Owned by the team. Details TBD.**
-
-The full project combines this image model with a **text** model (CamemBERT) via
-**late fusion** (a weighted average of the two probability vectors). What this
-repo guarantees today, so the text side can plug in cleanly later:
-
-- The image model emits a length-27 probability vector ordered by
-  `CANONICAL_CLASSES` (numerically sorted `prdtypecode`s). The text model must
-  use the **same order** for fusion to be correct.
-- `src/rakuten_img/fusion.py` already implements the weighted-average combine and
-  validates vector length; it is currently unused (no second input yet).
-- The `/predict` endpoint returns the full ordered vector + `canonical_classes`,
-  which is exactly what a fusion step needs to consume.
-
-The planned service layout (agreed, not yet built) is: an **image service**
-(this model + its API), a **text service** (teammates'), and a **fusion/gateway
-service** that calls both and combines their outputs. Anything beyond that
-(where the text code lives, how it's trained) is **to be decided with the
-group**.
+`scripts/check_ci_pins.py` runs **before** the install and fails if the two files
+ever disagree on a version — a subset is only trustworthy if it cannot drift.
 
 ---
 
 ## Contributing
 
-This is a shared group repository. Suggested flow:
-
-1. **Branch off `main`** for any change: `git checkout -b your-feature`.
-2. **Run the tests before opening a PR:** `make test` (they need neither torch
-   nor the dataset, so they're fast and run anywhere).
-3. **Open a pull request** into `main` and request a review from a teammate.
+1. **Branch off `main`**: `git checkout -b your-feature`.
+2. **Run `make test` before opening a PR.** CI runs the same 27 tests.
+3. **Open a pull request into `main`** and wait for the check to go green.
 4. **Never commit data or secrets.** `data/`, `models/`, `reports/`, `.env`,
-   `.dvc/config.local` and `nginx/.htpasswd` are gitignored on purpose  the
-   dataset is ~2.2 GB and the rest hold credentials. Don't force-add them.
-5. Keep the **image / text scopes separate** while the layout is being decided
-   (see the repository layout note above) so the two parts don't entangle before
-   the team agrees on structure.
-
----
-
-## Docker
-
-Two services: the API and an **nginx reverse proxy** in front of it. Nginx is
-the only public entrypoint (port **80**); it adds per-IP rate limiting, a
-10 MB upload cap, and HTTP basic auth on the `/train` endpoints.
-
-```bash
-# one-time: create the basic-auth file for /train (gitignored)
-printf "admin:$(openssl passwd -apr1)\n" > nginx/.htpasswd
-
-docker compose build
-docker compose up -d        # nginx on :80 -> API (internal :8000)
-docker compose ps           # both services should read (healthy)
-curl http://localhost/health
-```
-
-**Lost the `/train` password?** It cannot be recovered — `openssl passwd`
-stores a one-way hash. Re-run the `printf` line above to set a new one, then
-`docker compose restart nginx`.
-
-Both services declare healthchecks, and nginx waits for the API to be
-*healthy* (not merely started) before it comes up, so the proxy is never
-briefly live in front of a dead upstream. Memory limits are set from measured
-figures on the reference machine (WSL2, 4.807 GiB available to Docker): the API
-idles at ~47 MiB, serves at ~442 MiB with torch and the model loaded, and peaks
-at **~1.5 GiB during a full retrain**; its limit is 2.5 GB. Re-measure with
-`docker stats` before lowering it — too tight a limit shows up as a retrain
-that is OOM-killed midway rather than an obvious error.
-
-Secrets are injected at **runtime** via `env_file: .env` in
-`docker-compose.yml`  `.env` and `.dvc/` are excluded from the image by
-`.dockerignore`, so credentials never end up baked into image layers.
-
-The image is CPU-based (the pipeline doesn't need a GPU). A commented GPU block
-is in `docker-compose.yml` if you want to expose a card via
-nvidia-container-toolkit; note the Dockerfile installs the **CPU** torch wheel,
-so the image is CPU-only until that wheel is changed.
+   `.dvc/config.local`, `nginx/.htpasswd`, `airflow/.env.airflow` and
+   `airflow/logs/` are gitignored on purpose. Don't force-add them. Stage files
+   explicitly rather than with `git add -A`.
 
 ---
 
 ## Notes & limitations
 
-- **Resampling** balances each train class to ~4000 samples, reproducing the
-  modelisation methodology. It is done at the *feature* level via row indices +
-  a memory-mapped read of the cached features, so it never holds multiple full
-  copies in RAM. `class_weight="balanced"` is a lighter alternative.
-- **Crash-safe & resumable:** `process.py` saves each split's raw features
-  (`X_<split>_raw.npy`) to disk immediately after extraction, before resampling.
-  The expensive backbone pass is therefore never lost; rerunning resumes by
-  skipping splits whose raw features already exist.
-- **Processed images are not written to disk**  `process.py` goes straight from
-  raw image to feature vector, saving ~2.2 GB and an I/O pass.
-- **Memory:** the resampled train features are ~27×4000×1280×4 bytes ≈ 0.55 GB.
-  Lower `RESAMPLE_TARGET` in `config.py` if your machine is tight on RAM.
-- **First run downloads** the MobileNetV2 ImageNet weights (~14 MB), cached
-  afterward.
-- **CPU by default:** torch is installed as the CPU build; the backbone uses a
-  GPU automatically only if a CUDA-enabled torch sees one.
-- **The MLP's internal "Validation score" during training is optimistic**  it
-  is measured on a slice of the *resampled* train set (oversampled duplicates
-  leak between fit and internal validation). The number that counts is the
-  weighted F1 on the untouched val/test splits, printed by train.py and
-  evaluate.py.
+- **Resampling** balances each train class to ~4000 samples at the *feature*
+  level via row indices + a memory-mapped read, so it never holds multiple full
+  copies in RAM. `X_train.npy` is therefore the **resampled** set (108000 =
+  27 × 4000) and train row identity is unrecoverable by design — use `train_raw`
+  for the 67932 pre-resampling rows.
+- **Crash-safe & resumable:** `process.py` writes each split's raw features
+  before resampling, so the expensive backbone pass is never lost.
+- **Processed images are not written to disk** — straight from raw image to
+  feature vector, saving ~2.2 GB and an I/O pass.
+- **The MLP's internal "Validation score" during training is optimistic** — it is
+  measured on a slice of the *resampled* train set. The number that counts is
+  weighted F1 on the untouched val/test splits.
+- **`/health` reports `model_loaded` from the local joblib's existence**, which is
+  unrelated to what is actually served. Fixing it would change the API response
+  contract.
+- **`model_source` reads `not-loaded` until the first `/predict`** (lazy torch
+  import), so a freshly restarted image container looks unloaded but is healthy.
+- **Train/eval status is in-memory.** An API restart resets it to `idle`, which
+  the DAG's poller treats as an error.
+- **`models.dvc` tracks all of `models/` as one output**, so a text retrain
+  invalidates the image artifacts' directory hash and vice versa. Splitting it is
+  correct once the services get separate images.
+- **The vectorizer's `stop_words_`** held 1.69M discarded terms (25 of 27 MB).
+  It is introspection-only and is dropped before pickling; `models/text/` is
+  ~2.7 MB.
+- **Fixed-weight fusion is optimal on average, not per product.** Observed: a
+  jacuzzi where image said `2583` at 0.9999 and text said `2583` at 0.309 fused
+  to 0.413. Confidence-aware weighting might beat it, but it would have to be
+  measured on val the same way — not assumed.
