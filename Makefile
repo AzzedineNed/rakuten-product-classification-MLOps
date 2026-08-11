@@ -52,7 +52,7 @@ predict:
 	$(PY) scripts/predict.py --image "$(IMG)"
 
 serve:
-	$(PY) -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+	$(PY) -m uvicorn api.image_main:app --host 0.0.0.0 --port 8000 --reload
 
 docker-build:
 	docker compose build

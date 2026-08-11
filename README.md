@@ -72,7 +72,8 @@ rakuten-image-mlops/
 ├── scripts/             # thin CLI entrypoints over the package
 │   ├── _bootstrap.py    # makes src/ importable so scripts "just run"
 │   ├── collect.py  process.py  train.py  evaluate.py  predict.py
-├── api/main.py          # FastAPI: /predict, /train, /train/status, /health
+├── api/image_main.py    # FastAPI (image): /predict, /train, /train/status, /health
+├── api/text_main.py     # FastAPI (text):  /predict, /predict/batch, /health
 ├── nginx/default.conf   # reverse proxy: rate limits, body cap, auth on /train
 ├── tests/               # torch-free smoke tests
 ├── .dvc/                # DVC config (remote = DagsHub); token in config.local (gitignored)
@@ -239,7 +240,7 @@ API container itself is not published to the host. For local development
 without Docker, `make serve` still runs uvicorn directly on `:8000`.
 
 ```bash
-make serve     # dev only: uvicorn api.main:app on http://localhost:8000
+make serve     # dev only: uvicorn api.image_main:app on http://localhost:8000
 ```
 
 `POST /predict`  multipart image upload (open, rate-limited):

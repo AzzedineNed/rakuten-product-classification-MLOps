@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FastAPI service exposing the image model.
+"""FastAPI service exposing the IMAGE model.
 
 Endpoints:
   GET  /health          liveness + whether a model is loaded
@@ -19,7 +19,7 @@ reads, so starting either while the other runs would score a half-written file.
 Whichever is asked for second gets a 409.
 
 Run:
-  uvicorn api.main:app --host 0.0.0.0 --port 8000
+  uvicorn api.image_main:app --host 0.0.0.0 --port 8000
 """
 from __future__ import annotations
 

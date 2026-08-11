@@ -23,4 +23,6 @@ COPY . .
 
 EXPOSE 8000
 # Model weights are cached on first run; mount ./models and ./data as volumes.
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default command = the image service. docker-compose.yml overrides
+# `command:` per service, so one image serves image, text and gateway.
+CMD ["uvicorn", "api.image_main:app", "--host", "0.0.0.0", "--port", "8000"]
