@@ -35,9 +35,10 @@ import numpy as np
 from sklearn.metrics import accuracy_score, f1_score
 
 from rakuten_common import features as feat
+from rakuten_common import fusion
 from rakuten_common import split as shared
 from rakuten_common.contract import to_canonical
-from rakuten_img import classifier, config, fusion
+from rakuten_img import classifier, config
 from rakuten_text.predict import TfidfPredictor
 from rakuten_text.preprocessing import preparer_dataframe
 

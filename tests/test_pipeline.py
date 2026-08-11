@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from rakuten_img import classifier, config, data, fusion, images
+from rakuten_common import fusion
+from rakuten_img import classifier, config, data, images
 
 
 def _img_with_center_box(size=120, box=40, color=(200, 30, 30)):

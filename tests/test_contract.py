@@ -17,8 +17,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 
+from rakuten_common import fusion
 from rakuten_common.contract import to_canonical, validate_vector
-from rakuten_img import classifier, config, fusion
+from rakuten_img import classifier, config
 
 
 @pytest.fixture(scope="module")
@@ -150,3 +151,35 @@ def test_fusion_cannot_detect_misordering():
     assert misordered.shape[-1] == config.NUM_CLASSES  # no error raised
     assert float(misordered.sum()) == pytest.approx(1.0)  # still "valid"
     assert float(misordered[0]) == pytest.approx(0.5)  # confidence halved, silently
+
+
+# --------------------------------------------------------------------------- #
+# The fusion weight is a measurement, not a preference
+# --------------------------------------------------------------------------- #
+def test_default_text_weight_is_the_measured_one():
+    """Pins 0.85 so nobody quietly restores 0.5.
+
+    Measured by scripts/tune_fusion_weight.py on the shared val split: 0.5
+    scores 0.6621 weighted F1, BELOW text alone (0.7818), while 0.85 scores
+    0.7945 and confirms at 0.7973 on test. A default that loses to one of its
+    own inputs is a bug, and it is invisible without this test.
+    """
+    assert fusion.DEFAULT_TEXT_WEIGHT == 0.85
+
+
+def test_default_weight_actually_favours_text():
+    """A vector fused with the default must lean text-ward, not 50/50."""
+    image = np.zeros(config.NUM_CLASSES)
+    image[0] = 1.0
+    text = np.zeros(config.NUM_CLASSES)
+    text[1] = 1.0
+    out = fusion.weighted_average(image, text)  # no explicit weight
+    assert out[1] > out[0]
+    assert out[1] == pytest.approx(0.85)
+
+
+def test_fusion_rejects_out_of_range_weight():
+    a = np.full(config.NUM_CLASSES, 1.0 / config.NUM_CLASSES)
+    for bad in (-0.1, 1.1):
+        with pytest.raises(ValueError):
+            fusion.weighted_average(a, a, text_weight=bad)
