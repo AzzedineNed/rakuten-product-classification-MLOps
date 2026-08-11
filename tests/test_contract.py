@@ -1,0 +1,152 @@
+"""THE CONTRACT TEST -- the highest-value test in this project.
+
+Fusion combines an image probability vector with a text probability vector by
+weighted average. That is correct if and only if both vectors are ordered by
+config.CANONICAL_CLASSES. fusion.weighted_average validates the LENGTH and
+nothing else, so a misordered vector does not raise, does not warn, and yields
+confident wrong answers that look entirely reasonable. Ordering fails SILENTLY.
+These tests are what makes it fail loudly instead.
+
+Torch-free and data-free: the fixtures below train tiny sklearn models on
+synthetic text in a fraction of a second. No dataset, no cached features, no
+model artifacts.
+"""
+import numpy as np
+import pytest
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
+
+from rakuten_common.contract import to_canonical, validate_vector
+from rakuten_img import classifier, config, fusion
+
+
+@pytest.fixture(scope="module")
+def tiny_text_model():
+    """A TF-IDF + LogisticRegression over all 27 classes, trained in-memory."""
+    docs, labels = [], []
+    for c in config.CANONICAL_CLASSES:
+        for k in range(4):
+            docs.append(f"produit categorie{c} terme{c}_{k} description commune")
+            labels.append(c)
+    model = make_pipeline(
+        TfidfVectorizer(ngram_range=(1, 2)),
+        LogisticRegression(max_iter=500, random_state=42),
+    )
+    model.fit(docs, labels)
+    return model
+
+
+# --------------------------------------------------------------------------- #
+# The order itself
+# --------------------------------------------------------------------------- #
+def test_canonical_classes_are_unique_sorted_ints():
+    cls = config.CANONICAL_CLASSES
+    assert len(cls) == 27 == len(set(cls))
+    assert all(isinstance(c, int) for c in cls)
+    assert cls == sorted(cls)
+
+
+def test_labels_align_one_to_one_with_classes():
+    assert len(config.CANONICAL_LABELS) == len(config.CANONICAL_CLASSES)
+    # The pairing is what the API returns to users; a shift here mislabels
+    # every prediction while every probability stays "correct".
+    for code, label in zip(config.CANONICAL_CLASSES, config.CANONICAL_LABELS):
+        assert config.prdtypecode_labels[code] == label
+
+
+# --------------------------------------------------------------------------- #
+# Text modality
+# --------------------------------------------------------------------------- #
+def test_text_model_classes_match_canonical(tiny_text_model):
+    got = [int(c) for c in tiny_text_model[-1].classes_]
+    assert got == list(config.CANONICAL_CLASSES)
+
+
+def test_text_vector_satisfies_the_contract(tiny_text_model):
+    proba = tiny_text_model.predict_proba(["produit categorie60 terme60_1"])[0]
+    vec = to_canonical(proba, tiny_text_model[-1].classes_)
+    validate_vector(vec)  # length 27, sums to ~1, non-negative
+    assert vec.shape == (config.NUM_CLASSES,)
+
+
+def test_text_argmax_maps_to_the_right_code(tiny_text_model):
+    """The end-to-end claim: position i of the vector means CANONICAL_CLASSES[i]."""
+    for code in (10, 60, 1560, 2905):
+        proba = tiny_text_model.predict_proba([f"produit categorie{code} terme{code}_0"])[0]
+        vec = to_canonical(proba, tiny_text_model[-1].classes_)
+        assert config.CANONICAL_CLASSES[int(vec.argmax())] == \
+            int(tiny_text_model.predict([f"produit categorie{code} terme{code}_0"])[0])
+
+
+# --------------------------------------------------------------------------- #
+# Both modalities agree
+# --------------------------------------------------------------------------- #
+def test_both_reorder_helpers_agree():
+    """rakuten_common.contract.to_canonical and rakuten_img.classifier.
+    reorder_to_canonical must be interchangeable; two implementations of one
+    contract is how drift starts."""
+    rng = np.random.default_rng(0)
+    proba = rng.random((3, config.NUM_CLASSES))
+    proba /= proba.sum(axis=1, keepdims=True)
+    shuffled = list(reversed(config.CANONICAL_CLASSES))
+    np.testing.assert_allclose(
+        to_canonical(proba, shuffled),
+        classifier.reorder_to_canonical(proba, shuffled),
+    )
+
+
+def test_reorder_actually_reorders():
+    """A permuted model order must be undone, not passed through."""
+    reversed_classes = list(reversed(config.CANONICAL_CLASSES))
+    proba = np.arange(config.NUM_CLASSES, dtype=float)
+    proba = proba / proba.sum()
+    out = to_canonical(proba, reversed_classes)
+    np.testing.assert_allclose(out, proba[::-1])
+
+
+def test_to_canonical_rejects_a_model_missing_a_class():
+    with pytest.raises(ValueError):
+        to_canonical(np.zeros(26), config.CANONICAL_CLASSES[:-1])
+
+
+# --------------------------------------------------------------------------- #
+# Tolerance: real vectors never sum to exactly 1.0
+# --------------------------------------------------------------------------- #
+def test_validate_accepts_float_noise():
+    """Measured on the real text model: 0.9999999999999998. An == 1.0 check
+    would reject a perfectly valid vector."""
+    vec = np.full(config.NUM_CLASSES, 1.0 / config.NUM_CLASSES)
+    vec[0] -= 2e-16
+    validate_vector(vec)
+
+
+def test_validate_rejects_wrong_length_and_bad_sums():
+    with pytest.raises(ValueError):
+        validate_vector(np.full(26, 1 / 26))
+    with pytest.raises(ValueError):
+        validate_vector(np.full(config.NUM_CLASSES, 1.0))  # sums to 27
+
+
+# --------------------------------------------------------------------------- #
+# Why this file exists
+# --------------------------------------------------------------------------- #
+def test_fusion_cannot_detect_misordering():
+    """Documents the danger rather than fixing it.
+
+    A reversed text vector passes fusion.weighted_average without complaint and
+    changes the answer. Fusion cannot police ordering -- only the tests above
+    can, which is precisely why they exist.
+    """
+    image = np.zeros(config.NUM_CLASSES)
+    image[0] = 1.0
+    text = np.zeros(config.NUM_CLASSES)
+    text[0] = 1.0
+
+    correct = fusion.weighted_average(image, text, text_weight=0.5)
+    assert int(correct.argmax()) == 0
+
+    misordered = fusion.weighted_average(image, text[::-1], text_weight=0.5)
+    assert misordered.shape[-1] == config.NUM_CLASSES  # no error raised
+    assert float(misordered.sum()) == pytest.approx(1.0)  # still "valid"
+    assert float(misordered[0]) == pytest.approx(0.5)  # confidence halved, silently
