@@ -1,0 +1,62 @@
+# Prometheus scrape configuration for the Rakuten stack.
+#
+# WHAT IS SCRAPED
+#   The three FastAPI services, on the compose network, by service name. Their
+#   /metrics endpoints are NOT routed through nginx and no service publishes a
+#   host port, so metrics are reachable from inside the compose network only —
+#   which is the whole reason this file can use plain http with no auth.
+#
+# ONE JOB PER SERVICE, not one job with three targets. The `job` label is what
+# makes `up{job="text-api"}` mean "is the text service being scraped", which is
+# the single most useful alerting expression here. Lumping all three into one
+# job would push that distinction into the instance label, where it is the
+# container's host:port rather than a name a human recognises.
+#
+# NOTE: the application metrics already carry their own `service` label
+# (service="image" / "text" / "gateway"), set in rakuten_common.observability.
+# That label and the `job` label are deliberately redundant: `job`/`up` describe
+# the SCRAPE (did Prometheus reach it), `service` describes the APPLICATION
+# (what did it report). A service that is up but serving no model shows
+# up{job="text-api"}==1 alongside rakuten_model_info{source="not-loaded"}.
+#
+# EDITING THIS FILE: it is bind-mounted read-only, and Prometheus does NOT pick
+# up changes on its own — exactly like nginx/default.conf (known wart 1). After
+# editing, run:  sudo docker compose restart prometheus
+
+global:
+  # 15s is Prometheus's own default and is comfortable here: the whole stack is
+  # four scrape targets on one laptop. Faster buys nothing; slower would make a
+  # short retrain or a failed prediction burst easy to miss between samples.
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  # Must stay BELOW scrape_interval, or a slow target makes scrapes overlap.
+  scrape_timeout: 10s
+
+# No alerting/rules yet. A rules file with no Alertmanager behind it would only
+# create the impression that something is watching. Add both together or
+# neither.
+
+scrape_configs:
+  - job_name: image-api
+    static_configs:
+      - targets: ["api:8000"]
+        labels:
+          modality: image
+
+  - job_name: text-api
+    static_configs:
+      - targets: ["text-api:8001"]
+        labels:
+          modality: text
+
+  - job_name: gateway
+    static_configs:
+      - targets: ["gateway:8002"]
+        labels:
+          modality: fusion
+
+  # Prometheus scraping itself. Cheap, and it is the thing that tells you the
+  # monitoring is alive when every other target is red.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
