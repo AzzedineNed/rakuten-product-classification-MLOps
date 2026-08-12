@@ -135,7 +135,7 @@ rakuten-image-mlops/
 ├── nginx/default.conf         # the only public entrypoint
 ├── airflow/dags/              # rakuten_image_pipeline
 ├── .github/workflows/tests.yml
-├── tests/                     # 27 tests, torch-free and data-free
+├── tests/                     # 57 tests, torch-free and data-free
 └── requirements.txt  requirements-ci.txt  Dockerfile  docker-compose*.yml  Makefile
 ```
 
@@ -156,7 +156,7 @@ pip install -r requirements.txt
 Run the tests (need neither torch nor data):
 
 ```bash
-make test             # 27 tests
+make test             # 57 tests
 ```
 
 > **Pins are load-bearing.** `numpy` stays `<2` because torch 2.2.2 requires it,
@@ -243,16 +243,37 @@ other with `degraded=true` plus an `errors` block; if both fail, 502.
 
 ### Model loading order
 
+**Both** serving services follow the same rule, via the shared
+`rakuten_common/registry.py`:
+
 1. **MLflow Model Registry, alias first** — the version carrying the
    `production` alias.
 2. **Newest registered version**, labelled `(unpromoted)`, if no alias resolves.
-3. **Local `models/image_classifier.joblib`** if the registry is unreachable or
-   tracking is unset.
+3. **Local artifacts** if the registry is unreachable or tracking is unset —
+   `models/image_classifier.joblib` for image, `models/text/*.pkl` for text.
+
+`GET /health` reports the outcome as `model_source`, e.g.
+`registry:rakuten-text-classifier@production/v1` for a deliberate promotion,
+`registry:…/v6 (unpromoted)` for a fallback to the newest version, or
+`local:…` when the registry was not reachable. That field — not `model_path` —
+is the answer to "which model is serving?".
+
+The two services differ in *when* they resolve: the text service loads eagerly at
+startup (its artifacts are ~2.7 MB), the image service lazily on first `/predict`
+(torch is expensive to import). Neither consults the registry per request.
 
 Serving never hard-fails on a network problem. **Training never promotes** — the
-`production` alias moves only via `scripts/promote.py`. Because the registry copy
-is cached for the process lifetime, `docker compose restart api` is what picks up
-a newly promoted version.
+`production` alias moves only via `scripts/promote.py`. Because the resolved
+model is cached for the process lifetime, `docker compose restart api` (or
+`text-api`) is what picks up a newly promoted version.
+
+A serving process caps MLflow's HTTP retries (2 retries, 10s timeout) rather than
+using its shipped defaults. Measured: against an unreachable tracking server the
+defaults blocked for **over 170 seconds**, which — with compose's healthcheck and
+the gateway's `depends_on: service_healthy` — would take the whole stack down
+during a DagsHub outage instead of degrading to the local model. With the cap the
+same startup took 10.7s. Raise `MLFLOW_HTTP_REQUEST_MAX_RETRIES` /
+`MLFLOW_HTTP_REQUEST_TIMEOUT` to override.
 
 ---
 
@@ -307,8 +328,9 @@ One account token drives three things:
   payload) and attaches test metrics, the classification report and the confusion
   matrix. One run tells the full story. Both modalities do this.
 - **Model Registry** — two registered models: `rakuten-image-classifier`
-  (`production` → v2, six versions) and `rakuten-text-classifier` (v1, no alias
-  yet). Adding the text model did not move image serving at all.
+  (`production` → v2, six versions) and `rakuten-text-classifier`
+  (`production` → v1). Both are served alias-first; promoting the text model did
+  not move image serving at all.
 - **DVC** — `data/raw` and `models` are tracked and pushed to the DagsHub remote
   over HTTP. Pointer files are committed; the data never is.
 
@@ -335,6 +357,10 @@ Both files are gitignored. Each person uses their own token.
 | `MLFLOW_TRACKING_URI` | – | DagsHub MLflow endpoint; unset = tracking off |
 | `MLFLOW_TRACKING_USERNAME` / `_PASSWORD` | – | DagsHub username / token |
 | `MLFLOW_EXPERIMENT_NAME` | `rakuten-image` | experiment for the image runs |
+| `RAKUTEN_TEXT_REGISTERED_MODEL` | `rakuten-text-classifier` | registry name (text) |
+| `RAKUTEN_TEXT_EXPERIMENT` | `rakuten-text` | experiment for the text runs |
+| `MLFLOW_HTTP_REQUEST_MAX_RETRIES` | `2` when serving | capped so a dead registry cannot hang startup |
+| `MLFLOW_HTTP_REQUEST_TIMEOUT` | `10` when serving | same reason |
 | `ENS_USERNAME` / `ENS_PASSWORD` | – | credentials for `collect.py --from-ens` |
 | `ENS_BASE` | `https://challengedata.ens.fr` | ENS site base URL |
 | `ENS_CHALLENGE_ID` | `35` | ENS challenge number |
@@ -375,8 +401,10 @@ It registers a new model version and **never promotes**.
 
 ## CI
 
-`.github/workflows/tests.yml` runs the 27 tests on every push and pull request to
-`main`, on Python 3.12, in **~35s**.
+`.github/workflows/tests.yml` runs the tests on every push and pull request to
+`main`, on Python 3.12. CI installs `requirements-ci.txt`, which omits mlflow, so
+the tests that need a real registry **skip** there rather than fail: 45 pass and
+12 skip in CI, while all 57 run locally.
 
 CI installs `requirements-ci.txt` — a deliberate **subset** of
 `requirements.txt` that omits mlflow, dagshub, dvc and the API stack, none of
@@ -391,7 +419,8 @@ ever disagree on a version — a subset is only trustworthy if it cannot drift.
 ## Contributing
 
 1. **Branch off `main`**: `git checkout -b your-feature`.
-2. **Run `make test` before opening a PR.** CI runs the same 27 tests.
+2. **Run `make test` before opening a PR.** CI runs the same tests, minus the
+   ones needing mlflow.
 3. **Open a pull request into `main`** and wait for the check to go green.
 4. **Never commit data or secrets.** `data/`, `models/`, `reports/`, `.env`,
    `.dvc/config.local`, `nginx/.htpasswd`, `airflow/.env.airflow` and
@@ -419,6 +448,11 @@ ever disagree on a version — a subset is only trustworthy if it cannot drift.
   contract.
 - **`model_source` reads `not-loaded` until the first `/predict`** (lazy torch
   import), so a freshly restarted image container looks unloaded but is healthy.
+- **nginx keeps a stale backend IP after `docker compose up --build`.** Recreating
+  a service gives it a new IP; nginx resolved the old one at startup and returns
+  **502** until `docker compose restart nginx`. `docker compose restart <service>`
+  reuses the container and its IP, so it does *not* need this. Same family as the
+  bind-mounted-config wart above, different trigger.
 - **Train/eval status is in-memory.** An API restart resets it to `idle`, which
   the DAG's poller treats as an error.
 - **`models.dvc` tracks all of `models/` as one output**, so a text retrain

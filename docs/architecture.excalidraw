@@ -729,6 +729,10 @@
         {
           "id": "arr058",
           "type": "arrow"
+        },
+        {
+          "id": "arrow-mlflow-textapi",
+          "type": "arrow"
         }
       ],
       "updated": 1,
@@ -740,7 +744,7 @@
       "type": "text",
       "x": 978,
       "y": 568,
-      "width": 444,
+      "width": 323.40000000000003,
       "height": 70.0,
       "angle": 0,
       "strokeColor": "#1e1e1e",
@@ -763,8 +767,8 @@
       "locked": false,
       "fontSize": 14,
       "fontFamily": 1,
-      "text": "MLflow\nruns + Model Registry\nrakuten-image-classifier  production -> v2\nrakuten-text-classifier   v1, no alias",
-      "originalText": "MLflow\nruns + Model Registry\nrakuten-image-classifier  production -> v2\nrakuten-text-classifier   v1, no alias",
+      "text": "MLflow\nruns + Model Registry\nrakuten-image-classifier  production -> v2\nrakuten-text-classifier   production -> v1",
+      "originalText": "MLflow\nruns + Model Registry\nrakuten-image-classifier  production -> v2\nrakuten-text-classifier   production -> v1",
       "textAlign": "center",
       "verticalAlign": "middle",
       "lineHeight": 1.25,
@@ -1049,6 +1053,10 @@
         {
           "id": "arr056",
           "type": "arrow"
+        },
+        {
+          "id": "arrow-mlflow-textapi",
+          "type": "arrow"
         }
       ],
       "updated": 1,
@@ -1060,8 +1068,8 @@
       "type": "text",
       "x": 998,
       "y": 968,
-      "width": 284,
-      "height": 52.5,
+      "width": 231.00000000000003,
+      "height": 70.0,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -1083,8 +1091,8 @@
       "locked": false,
       "fontSize": 14,
       "fontFamily": 1,
-      "text": "rakuten-text-api\napi/text_main.py  :8001\nTF-IDF + LogReg, models :ro",
-      "originalText": "rakuten-text-api\napi/text_main.py  :8001\nTF-IDF + LogReg, models :ro",
+      "text": "rakuten-text-api\napi/text_main.py  :8001\nTF-IDF + LogReg\nregistry-first, local fallback",
+      "originalText": "rakuten-text-api\napi/text_main.py  :8001\nTF-IDF + LogReg\nregistry-first, local fallback",
       "textAlign": "center",
       "verticalAlign": "middle",
       "lineHeight": 1.25,
@@ -1282,7 +1290,7 @@
       "type": "text",
       "x": 758,
       "y": 1328,
-      "width": 404,
+      "width": 300.3,
       "height": 70.0,
       "angle": 0,
       "strokeColor": "#1e1e1e",
@@ -1305,8 +1313,8 @@
       "locked": false,
       "fontSize": 14,
       "fontFamily": 1,
-      "text": "GitHub Actions\n.github/workflows/tests.yml\n27 tests on pinned deps, ~35s\non push + PR to main",
-      "originalText": "GitHub Actions\n.github/workflows/tests.yml\n27 tests on pinned deps, ~35s\non push + PR to main",
+      "text": "GitHub Actions\n.github/workflows/tests.yml\n57 tests locally, 45 + 12 skipped in CI\non push + PR to main",
+      "originalText": "GitHub Actions\n.github/workflows/tests.yml\n57 tests locally, 45 + 12 skipped in CI\non push + PR to main",
       "textAlign": "center",
       "verticalAlign": "middle",
       "lineHeight": 1.25,
@@ -2422,8 +2430,8 @@
       "type": "text",
       "x": 974.3862660944205,
       "y": 713.0,
-      "width": 369.6,
-      "height": 15.0,
+      "width": 264.0,
+      "height": 30.0,
       "angle": 0,
       "strokeColor": "#868e96",
       "backgroundColor": "transparent",
@@ -2445,8 +2453,8 @@
       "locked": false,
       "fontSize": 12,
       "fontFamily": 1,
-      "text": "alias 'production' first, then newest, else local joblib",
-      "originalText": "alias 'production' first, then newest, else local joblib",
+      "text": "both services: alias 'production' first,\nthen newest, else the local artifacts",
+      "originalText": "both services: alias 'production' first,\nthen newest, else the local artifacts",
       "textAlign": "left",
       "verticalAlign": "top",
       "lineHeight": 1.25,
@@ -2848,6 +2856,66 @@
       "lineHeight": 1.25,
       "containerId": null,
       "autoResize": true
+    },
+    {
+      "id": "arrow-mlflow-textapi",
+      "type": "arrow",
+      "x": 1430,
+      "y": 655,
+      "width": 210,
+      "height": 365,
+      "angle": 0,
+      "strokeColor": "#868e96",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": {
+        "type": 2
+      },
+      "seed": 2090166079,
+      "version": 1,
+      "versionNonce": 1487811885,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          70,
+          0
+        ],
+        [
+          70,
+          365
+        ],
+        [
+          -140,
+          365
+        ]
+      ],
+      "startBinding": {
+        "elementId": "rec019",
+        "focus": 0.2,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "rec027",
+        "focus": 0.2,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
     }
   ],
   "appState": {
