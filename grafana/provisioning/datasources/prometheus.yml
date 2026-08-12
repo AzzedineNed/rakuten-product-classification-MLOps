@@ -1,0 +1,29 @@
+# Grafana datasource provisioning.
+#
+# Provisioned as a FILE rather than clicked in the UI on purpose: a datasource
+# created by hand lives only in Grafana's sqlite database, which is a named
+# volume. Wipe the volume and the dashboard silently loses its data source.
+# This file is the source of truth and is reapplied on every Grafana start.
+#
+# EDITING: Grafana re-reads provisioning only at startup.
+#   sudo docker compose restart grafana
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    # A FIXED uid, not a generated one. The dashboard JSON references this uid;
+    # letting Grafana mint a random one would make every panel read
+    # "Datasource ${DS_PROMETHEUS} was not found" after a volume reset.
+    uid: rakuten-prometheus
+    access: proxy
+    # Service name on the compose network. Prometheus publishes no host port.
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Must match prometheus.yml's global scrape_interval, or Grafana's
+      # $__rate_interval computes a window narrower than one scrape and every
+      # rate() panel shows gaps.
+      timeInterval: 15s

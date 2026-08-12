@@ -159,6 +159,13 @@ services:
         condition: service_healthy
       gateway:
         condition: service_healthy
+      # Added with the /grafana/ and /prometheus/ routes: nginx resolves ALL
+      # upstream names at startup and refuses to boot if one does not exist,
+      # so these two are now boot dependencies, not optional extras.
+      prometheus:
+        condition: service_healthy
+      grafana:
+        condition: service_healthy
     restart: unless-stopped
     mem_limit: 128m
     # nginx:alpine ships busybox wget. Probing /health goes through to the API,
@@ -191,6 +198,14 @@ services:
       # 15 days on a laptop with four targets is a few tens of MB. The default
       # is also 15d; stated explicitly so it is a decision, not an accident.
       - --storage.tsdb.retention.time=15d
+      # Tells Prometheus the URL humans reach it on, so its redirects and the
+      # links in its own UI carry the /prometheus/ prefix nginx adds.
+      # route-prefix stays "/" DELIBERATELY: it keeps the API reachable at
+      # http://prometheus:9090/api/v1/... from inside the compose network,
+      # which is how Grafana queries it. Setting route-prefix to /prometheus/
+      # would move the API too and break the datasource.
+      - --web.external-url=${PROMETHEUS_EXTERNAL_URL:-http://localhost/prometheus/}
+      - --web.route-prefix=/
     # NOT gated on the services being healthy, deliberately. Monitoring that
     # refuses to start until the things it monitors are healthy is backwards:
     # a target that is down should show up{job=...}==0 on the dashboard, which
@@ -215,6 +230,64 @@ services:
       retries: 3
       start_period: 10s
 
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: rakuten-grafana
+    # Same rule as everything else: no host port. Reaching the UI is nginx's
+    # job (next step). Until then it is only reachable inside the network.
+    expose:
+      - "3000"
+    volumes:
+      # Provisioning is read-only and versioned in git. A datasource or
+      # dashboard created by hand in the browser would live only in Grafana's
+      # sqlite DB inside the volume below, and vanish if that volume is reset.
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      # VERIFIED: the image runs as uid 472 gid 0 and declares /var/lib/grafana
+      # as a VOLUME, so a NAMED volume gets the right ownership. A ./bind mount
+      # would be owned by the host user and Grafana would fail to write.
+      - grafana-data:/var/lib/grafana
+    environment:
+      # `?` form: compose REFUSES TO START if the variable is unset, instead of
+      # silently falling back to Grafana's default admin/admin on a service that
+      # is about to be published through nginx. Set it in .env (gitignored).
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      # No anonymous access and no sign-up: this is reachable from the LAN once
+      # nginx proxies it.
+      # Grafana is reached at http://<host>/grafana/ through nginx. Both of
+      # these are required: ROOT_URL so generated links carry the prefix, and
+      # SERVE_FROM_SUB_PATH so Grafana serves under it. With SERVE_FROM_SUB_PATH
+      # true, nginx must NOT strip the prefix — see nginx/default.conf, where
+      # the proxy_pass for /grafana/ deliberately has no trailing slash.
+      # Override GRAFANA_ROOT_URL in .env if you reach the host by LAN IP
+      # rather than localhost.
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost/grafana/}
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # Telemetry off — this is a coursework stack, not a fleet.
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+    # Grafana starts fine without Prometheus and shows the datasource as down,
+    # which is the more useful failure mode than refusing to boot.
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+    # PROVISIONAL — NOT MEASURED. Measure with `docker stats` and tighten.
+    mem_limit: 512m
+
+    # VERIFIED on grafana/grafana:11.3.0: the image ships BOTH wget and curl.
+    # /api/health is Grafana's own endpoint and does not require auth.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
 volumes:
   torch-cache:
   prometheus-data:
+  grafana-data:

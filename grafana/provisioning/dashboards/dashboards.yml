@@ -1,0 +1,21 @@
+# Dashboard provisioning provider.
+#
+# Points Grafana at a read-only directory of dashboard JSON files, so the
+# dashboard is versioned in git rather than living only inside Grafana's
+# database. allowUiUpdates is false: edits made in the browser would be
+# overwritten on restart, and a dashboard that silently reverts is worse than
+# one that refuses to be edited. Change the JSON, commit, restart.
+
+apiVersion: 1
+
+providers:
+  - name: rakuten
+    orgId: 1
+    folder: Rakuten
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false

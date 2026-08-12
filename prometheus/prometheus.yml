@@ -19,6 +19,16 @@
 # (what did it report). A service that is up but serving no model shows
 # up{job="text-api"}==1 alongside rakuten_model_info{source="not-loaded"}.
 #
+# NO EXTRA TARGET LABELS HERE, and that is a correction, not an oversight.
+# These jobs originally attached `modality: image|text|fusion` at scrape time.
+# But rakuten_model_info ALREADY carries its own `modality` label, and when a
+# target label collides with a label the application exported, Prometheus keeps
+# the target's and RENAMES the application's to `exported_modality`. The result
+# was a dashboard table showing both columns, and — worse — any query grouping
+# by `modality` silently grouping by the scrape label instead of the app's.
+# Observed live before it was removed. `job` already distinguishes the three
+# targets, so the label bought nothing and cost correctness.
+#
 # EDITING THIS FILE: it is bind-mounted read-only, and Prometheus does NOT pick
 # up changes on its own — exactly like nginx/default.conf (known wart 1). After
 # editing, run:  sudo docker compose restart prometheus
@@ -40,20 +50,14 @@ scrape_configs:
   - job_name: image-api
     static_configs:
       - targets: ["api:8000"]
-        labels:
-          modality: image
 
   - job_name: text-api
     static_configs:
       - targets: ["text-api:8001"]
-        labels:
-          modality: text
 
   - job_name: gateway
     static_configs:
       - targets: ["gateway:8002"]
-        labels:
-          modality: fusion
 
   # Prometheus scraping itself. Cheap, and it is the thing that tells you the
   # monitoring is alive when every other target is red.
