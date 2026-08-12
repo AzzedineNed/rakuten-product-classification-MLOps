@@ -34,3 +34,4 @@ airflow/config/
 # Nginx basic-auth credentials (create locally: see nginx/default.conf header)
 nginx/.htpasswd
 /models
+mlruns/
