@@ -31,13 +31,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from fastapi import BackgroundTasks, FastAPI, File, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Query, Response, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image
 
+from rakuten_common.observability import PrometheusMiddleware, ServiceMetrics
 from rakuten_img import config
 
 app = FastAPI(title="Rakuten Image Classifier", version="1.0.0")
+
+METRICS = ServiceMetrics("image")
+app.add_middleware(PrometheusMiddleware, metrics=METRICS)
 
 _TRAIN_STATUS: dict = {"state": "idle", "detail": None, "metrics": None}
 _EVAL_STATUS: dict = {"state": "idle", "detail": None, "metrics": None}
@@ -56,13 +60,27 @@ def _busy() -> str | None:
     return None
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus exposition. Deliberately NOT routed through nginx: it is
+    scraped over the compose network, so it is not reachable from outside."""
+    body, content_type = METRICS.render()
+    return Response(content=body, media_type=content_type)
+
+
 @app.get("/health")
 def health():
     import predict as predict_script  # scripts/predict.py
 
     model_present = config.CLASSIFIER_PATH.exists()
+    source = predict_script.model_source()
+    # Published here as well as after a prediction because this service
+    # resolves its model lazily (model_source() reads "not-loaded" until the
+    # first /predict — a documented wart). Whichever happens first, the gauge
+    # stops being empty.
+    METRICS.set_model_info("image", source)
     return {"status": "ok", "model_loaded": model_present,
-            "model_source": predict_script.model_source(),
+            "model_source": source,
             "backbone": config.BACKBONE_NAME, "num_classes": config.NUM_CLASSES}
 
 
@@ -86,6 +104,11 @@ async def predict_endpoint(file: UploadFile = File(...), top_k: int = Query(5, g
          "probability": float(proba[i])}
         for i in order
     ]
+    METRICS.observe_prediction(top[0]["code"], top[0]["probability"])
+    # The model is only actually resolved on the first /predict, so this is the
+    # earliest point at which model_source() is truthful for this service.
+    METRICS.set_model_info("image", predict_script.model_source())
+
     # Full vector + class order so a fusion layer can consume it directly.
     return {
         "top_k": top,

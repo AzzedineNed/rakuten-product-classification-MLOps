@@ -46,10 +46,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import numpy as np
 import requests
-from fastapi import FastAPI, File, Form, Query, UploadFile
+from fastapi import FastAPI, File, Form, Query, Response, UploadFile
 from fastapi.responses import JSONResponse
 
 from rakuten_common import fusion
+from rakuten_common.observability import PrometheusMiddleware, ServiceMetrics
 from rakuten_img import config
 
 logging.basicConfig(level=logging.INFO,
@@ -66,6 +67,13 @@ app = FastAPI(
                 "follow CANONICAL_CLASSES.",
     version="1.0.0",
 )
+
+METRICS = ServiceMetrics("gateway")
+app.add_middleware(PrometheusMiddleware, metrics=METRICS)
+# The gateway owns no model. The label says so explicitly rather than leaving
+# the series absent, so a dashboard panel listing all three services does not
+# show a mysterious gap for this one.
+METRICS.set_model_info("fusion", "none (coordinator)")
 
 
 def _vector_from(payload: dict, source: str) -> np.ndarray:
@@ -123,6 +131,14 @@ def _upstream_health(base: str) -> dict:
         return {"reachable": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus exposition. Scraped over the compose network only; nginx
+    does not route it, so it is not publicly reachable."""
+    body, content_type = METRICS.render()
+    return Response(content=body, media_type=content_type)
+
+
 @app.get("/health")
 def health():
     """The gateway is up if it answers; the upstreams are reported separately.
@@ -175,6 +191,7 @@ async def predict(
         except Exception as exc:  # noqa: BLE001
             logger.warning("image upstream failed: %s", exc)
             errors["image"] = f"{type(exc).__name__}: {exc}"
+            METRICS.observe_upstream_failure("image")
 
     if want_text:
         try:
@@ -182,6 +199,7 @@ async def predict(
         except Exception as exc:  # noqa: BLE001
             logger.warning("text upstream failed: %s", exc)
             errors["text"] = f"{type(exc).__name__}: {exc}"
+            METRICS.observe_upstream_failure("text")
 
     if not vectors:
         return JSONResponse(status_code=502, content={
@@ -228,4 +246,12 @@ async def predict(
         # the payload rather than returning a quietly weaker answer.
         body["degraded"] = True
         body["errors"] = errors
+
+    # Recorded AFTER `degraded` is decided, so the label is the truth about
+    # this response. `modalities` is the set that actually contributed, which
+    # is what makes "how often are we silently serving one modality?"
+    # answerable — the question the degradation design exists to expose.
+    METRICS.observe_fusion(vectors.keys(), fused=len(vectors) > 1,
+                           degraded=bool(errors))
+    METRICS.observe_prediction(top[0]["prdtypecode"], top[0]["probability"])
     return body

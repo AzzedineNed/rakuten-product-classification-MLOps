@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 # CI test dependencies — a deliberate SUBSET of requirements.txt.
 #
-# The 27-test suite is torch-free, mlflow-free and data-free: every import of
+# The suite is torch-free, mlflow-free and data-free: every import of
 # torch / mlflow / requests / tqdm / dotenv inside src/ is lazy (inside a
 # function or a try/except), so none of them is needed to import and test
 # rakuten_common / rakuten_img / rakuten_text.
@@ -9,6 +9,12 @@
 # Omitted on purpose (installed by requirements.txt, never touched by tests):
 #   mlflow, dagshub, dvc, dvc-http     -> tracking & data versioning
 #   fastapi, uvicorn, python-multipart -> the API layer; no test imports api/
+#
+# prometheus-client IS installed here, unlike the rest of the serving stack.
+# tests/test_observability.py drives the metrics middleware at the ASGI level
+# precisely so it needs no fastapi: a test that imported api/ would SKIP in
+# BOTH CI jobs and disappear from CI without a sound. One 80 KB dependency buys
+# real CI coverage of the instrumentation instead.
 #   torch, torchvision                 -> not in requirements.txt at all
 #
 # MEASURED: full requirements.txt = 128s / 192 packages / 995 MB.
@@ -35,6 +41,9 @@ tqdm==4.66.4
 matplotlib==3.8.4
 requests==2.31.0
 python-dotenv==1.0.1
+
+# Observability — see the note above; needed by tests/test_observability.py.
+prometheus-client==0.26.0
 
 # Dev / tests
 pytest==8.2.0

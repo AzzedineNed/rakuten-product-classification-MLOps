@@ -38,10 +38,11 @@ from typing import List, Optional
 # Make the src packages importable without install / PYTHONPATH.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from rakuten_common.observability import PrometheusMiddleware, ServiceMetrics
 from rakuten_text import config
 from rakuten_text.predict import TfidfPredictor
 
@@ -50,6 +51,7 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger("api-text")
 
 predictor = TfidfPredictor()
+METRICS = ServiceMetrics("text")
 
 
 @asynccontextmanager
@@ -77,6 +79,10 @@ async def lifespan(app: FastAPI):
         logger.info("Text model loaded from %s — API ready.", predictor.serving_source)
     except Exception as exc:  # noqa: BLE001
         logger.error("Could not load the text model: %s: %s", type(exc).__name__, exc)
+    # Published in BOTH cases on purpose. On failure serving_source is still
+    # "not-loaded", and a gauge that says so is far more useful on a dashboard
+    # than an absent series, which is indistinguishable from a dead scrape.
+    METRICS.set_model_info("text", predictor.serving_source)
     yield
 
 
@@ -87,6 +93,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(PrometheusMiddleware, metrics=METRICS)
 
 
 class Produit(BaseModel):
@@ -125,6 +132,14 @@ def _unavailable() -> Optional[JSONResponse]:
     )
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus exposition. Scraped over the compose network only; nginx
+    does not route it, so it is not publicly reachable."""
+    body, content_type = METRICS.render()
+    return Response(content=body, media_type=content_type)
+
+
 @app.get("/health")
 def health():
     """model_source is the AUTHORITATIVE answer to "which model is being
@@ -153,8 +168,11 @@ def predict(produit: Produit, top_k: int = 5):
         return unavailable
     top_k = max(1, min(int(top_k), config.NUM_CLASSES))
     try:
-        return predictor.predict_detailed(produit.designation,
-                                          produit.description, top_k=top_k)
+        result = predictor.predict_detailed(produit.designation,
+                                            produit.description, top_k=top_k)
+        METRICS.observe_prediction(result["prediction"]["prdtypecode"],
+                                   result["prediction"]["probability"])
+        return result
     except Exception as exc:  # noqa: BLE001
         logger.exception("Prediction failed")
         return JSONResponse(status_code=500, content={"error": str(exc)})
@@ -174,6 +192,12 @@ def predict_batch(batch: ProduitBatch, top_k: int = 5):
             predictor.predict_detailed(p.designation, p.description, top_k=top_k)
             for p in batch.produits
         ]
+        # One observation per PRODUCT, not per request: a batch of 50 is 50
+        # predictions. Counting it once would make predictions_total disagree
+        # with how many products were actually classified.
+        for result in results:
+            METRICS.observe_prediction(result["prediction"]["prdtypecode"],
+                                       result["prediction"]["probability"])
         return {"predictions": results}
     except Exception as exc:  # noqa: BLE001
         logger.exception("Batch prediction failed")

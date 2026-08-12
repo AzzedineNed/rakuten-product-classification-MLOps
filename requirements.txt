@@ -34,6 +34,13 @@ python-multipart==0.0.9
 # Dev / tests
 pytest==8.2.0
 
+# Observability (Prometheus exposition for the three FastAPI services).
+# ZERO transitive dependencies, which is why it was chosen over
+# prometheus-fastapi-instrumentator: that package's current release requires
+# starlette>=1.0.0 and silently upgrades starlette 0.37.2 -> 1.6.0, breaking
+# fastapi==0.111.0. See src/rakuten_common/observability.py.
+prometheus-client==0.26.0
+
 # Experiment tracking & data versioning (DagsHub-hosted)
 mlflow==3.14.0
 dagshub==0.7.0
