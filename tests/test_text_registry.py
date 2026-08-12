@@ -171,6 +171,7 @@ def test_serving_http_limits_are_small_enough_to_boot(tmp_path, monkeypatch):
     assert int(tracking._SERVING_HTTP_LIMITS["MLFLOW_HTTP_REQUEST_TIMEOUT"]) <= 30
 
 
+@pytest.mark.slow
 def test_serving_http_limits_are_applied(tmp_path, monkeypatch):
     """Verified as applied at CALL time, not import time: MLflow reads these on
     every request, so the bound holds even in a process that imported mlflow
@@ -186,6 +187,7 @@ def test_serving_http_limits_are_applied(tmp_path, monkeypatch):
         tracking._SERVING_HTTP_LIMITS["MLFLOW_HTTP_REQUEST_MAX_RETRIES"]
 
 
+@pytest.mark.slow
 def test_operator_can_raise_the_serving_http_limits(tmp_path, monkeypatch):
     """setdefault, not assignment: an operator who wants MLflow's patient
     retry behaviour back must be able to have it."""
@@ -249,6 +251,7 @@ def _real_registry(tmp_path, monkeypatch, versions, alias_on=None, drop_file=Non
     return name, created
 
 
+@pytest.mark.slow
 def test_real_registry_loads_both_files_from_a_directory_source(tmp_path, monkeypatch):
     """The shape difference from the image modality, exercised for real."""
     name, created = _real_registry(tmp_path, monkeypatch, versions=["a"])
@@ -259,6 +262,7 @@ def test_real_registry_loads_both_files_from_a_directory_source(tmp_path, monkey
     assert source == f"registry:{name}/v{created[0]} (unpromoted)"
 
 
+@pytest.mark.slow
 def test_real_registry_alias_beats_the_newest_version(tmp_path, monkeypatch):
     """A promoted v1 must keep serving after v2 is registered. This is the
     behaviour the whole registry item exists for."""
@@ -270,6 +274,7 @@ def test_real_registry_alias_beats_the_newest_version(tmp_path, monkeypatch):
     assert source == f"registry:{name}@{config.PRODUCTION_ALIAS}/v{created[0]}"
 
 
+@pytest.mark.slow
 def test_real_registry_without_an_alias_serves_the_newest(tmp_path, monkeypatch):
     """Today's live state for rakuten-text-classifier: registered, no alias."""
     _, created = _real_registry(tmp_path, monkeypatch, versions=["a", "b"])
@@ -279,6 +284,7 @@ def test_real_registry_without_an_alias_serves_the_newest(tmp_path, monkeypatch)
     assert f"/v{created[-1]} (unpromoted)" in source
 
 
+@pytest.mark.slow
 def test_real_registry_version_missing_a_file_is_rejected_by_name(tmp_path, monkeypatch):
     """A half-registered version must fail loudly with the missing filename, not
     load a vectorizer with no estimator.
@@ -300,6 +306,7 @@ def test_real_registry_version_missing_a_file_is_rejected_by_name(tmp_path, monk
     assert config.VECTORIZER_PATH.name in message  # the "found:" listing
 
 
+@pytest.mark.slow
 def test_real_registry_end_to_end_through_the_predictor(tmp_path, monkeypatch):
     """What /health will report once step 3 surfaces serving_source."""
     _real_registry(tmp_path, monkeypatch, versions=["a"], alias_on=0)
@@ -312,6 +319,7 @@ def test_real_registry_end_to_end_through_the_predictor(tmp_path, monkeypatch):
     assert predictor.model == {"src": "model-a"}
 
 
+@pytest.mark.slow
 def test_registry_reachable_but_model_unregistered_falls_back(tmp_path, monkeypatch):
     """Tracking configured, nothing registered yet — the first deploy. Serving
     must come up on the local artifacts instead of refusing."""

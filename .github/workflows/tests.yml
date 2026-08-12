@@ -53,3 +53,52 @@ jobs:
       # deliberately data-free and network-free.
       - name: Run tests
         run: pytest tests/ -q --durations=5
+
+  # WHY A SECOND JOB. requirements-ci.txt omits mlflow on purpose (65s/467MB
+  # instead of 128s/995MB), so the 12 tests that need a real registry SKIP in
+  # the job above. That was acceptable while the registry rule was a helper; it
+  # is not, now that both serving paths resolve a registered version through it.
+  # This job pays the install cost so those tests actually run, in parallel, so
+  # the wall-clock cost of a red build is unchanged.
+  #
+  # It runs the WHOLE suite with NO marker filter, deliberately: filtering on
+  # `-m slow` would mean a test whose marker someone forgets runs in neither
+  # job and disappears from CI without a sound.
+  tests-mlflow:
+    name: pytest (python 3.12, with mlflow)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Check CI pins against requirements.txt
+        run: python scripts/check_ci_pins.py
+
+      # The mlflow pin is READ OUT OF requirements.txt rather than written here,
+      # so this job cannot drift from the project's pin. check_ci_pins.py does
+      # not police it (mlflow is deliberately absent from requirements-ci.txt),
+      # which is exactly why it must not be duplicated by hand.
+      - name: Install test dependencies plus mlflow
+        run: |
+          python -m pip install --upgrade pip
+          MLFLOW_PIN="$(grep -iE '^mlflow==' requirements.txt)"
+          echo "Using pin: $MLFLOW_PIN"
+          test -n "$MLFLOW_PIN"
+          pip install -r requirements-ci.txt "$MLFLOW_PIN"
+
+      - name: Report resolved versions
+        run: |
+          python -c "import sklearn, numpy, pandas, mlflow; print('scikit-learn', sklearn.__version__); print('numpy       ', numpy.__version__); print('pandas      ', pandas.__version__); print('mlflow      ', mlflow.__version__)"
+
+      # No filter: everything runs here, including the tests the other job skips.
+      - name: Run the full suite
+        run: pytest tests/ -q --durations=5

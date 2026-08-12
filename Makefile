@@ -5,13 +5,14 @@ PY := .venv/bin/python
 PIP := .venv/bin/pip
 SOURCE ?=
 
-.PHONY: help setup install test collect collect-ens process train evaluate predict serve \
+.PHONY: help setup install test test-fast collect collect-ens process train evaluate predict serve \
         docker-build docker-up docker-down clean
 
 help:
 	@echo "Targets:"
 	@echo "  setup        create .venv and install deps (CPU torch)"
-	@echo "  test         run unit tests (no torch/data needed)"
+	@echo "  test         run all unit tests (no torch/data needed)"
+	@echo "  test-fast    same, minus the real-MLflow tests (edit loop)"
 	@echo "  collect      acquire raw data from local source (SOURCE=/path/or/url)"
 	@echo "  collect-ens  acquire raw data from ENS Challenge Data credentials"
 	@echo "  process      extract & cache features"
@@ -32,6 +33,11 @@ install:
 
 test:
 	$(PY) -m pytest -q
+
+# The edit loop. Skips the tests that stand up a real MLflow registry.
+# Run `make test` before opening a PR — CI runs everything.
+test-fast:
+	$(PY) -m pytest -q -m "not slow"
 
 collect:
 	$(PY) scripts/collect.py --source "$(SOURCE)"

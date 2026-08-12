@@ -128,6 +128,7 @@ def test_resolver_is_modality_agnostic():
 # the same expectations against a real registry
 # --------------------------------------------------------------------------
 @pytest.mark.parametrize("scenario", ["no_alias", "alias_set", "alias_deleted"])
+@pytest.mark.slow
 def test_against_a_real_mlflow_registry(tmp_path, monkeypatch, scenario):
     mlflow = pytest.importorskip("mlflow", reason="mlflow not installed (CI subset)")
     from mlflow import MlflowClient
@@ -168,6 +169,7 @@ def test_against_a_real_mlflow_registry(tmp_path, monkeypatch, scenario):
         assert "(unpromoted)" in source
 
 
+@pytest.mark.slow
 def test_real_registry_with_no_versions_raises_lookuperror(tmp_path, monkeypatch):
     mlflow = pytest.importorskip("mlflow", reason="mlflow not installed (CI subset)")
     from mlflow import MlflowClient

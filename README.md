@@ -136,7 +136,7 @@ rakuten-image-mlops/
 ├── airflow/dags/              # rakuten_image_pipeline
 ├── .github/workflows/tests.yml
 ├── tests/                     # 57 tests, torch-free and data-free
-└── requirements.txt  requirements-ci.txt  Dockerfile  docker-compose*.yml  Makefile
+└── requirements.txt  requirements-ci.txt  pytest.ini  Dockerfile  docker-compose*.yml  Makefile
 ```
 
 ---
@@ -401,15 +401,27 @@ It registers a new model version and **never promotes**.
 
 ## CI
 
-`.github/workflows/tests.yml` runs the tests on every push and pull request to
-`main`, on Python 3.12. CI installs `requirements-ci.txt`, which omits mlflow, so
-the tests that need a real registry **skip** there rather than fail: 45 pass and
-12 skip in CI, while all 57 run locally.
+`.github/workflows/tests.yml` runs on every push and pull request to `main`, on
+Python 3.12, as **two jobs in parallel**:
 
-CI installs `requirements-ci.txt` — a deliberate **subset** of
-`requirements.txt` that omits mlflow, dagshub, dvc and the API stack, none of
-which the tests import (every such import in `src/` is lazy). Measured: 128s and
-995 MB for the full file versus 65s and 467 MB for the subset.
+| job | installs | runs |
+|---|---|---|
+| `pytest (python 3.12, pinned)` | `requirements-ci.txt` | 45 pass, 12 skip |
+| `pytest (python 3.12, with mlflow)` | the same, plus mlflow | all 57 |
+
+The first job installs a deliberate **subset** of `requirements.txt` that omits
+mlflow, dagshub, dvc and the API stack, none of which the tests import (every
+such import in `src/` is lazy). Measured: 128s and 995 MB for the full file
+versus 65s and 467 MB for the subset. The 12 tests that stand up a real MLflow
+registry `importorskip` there rather than fail.
+
+The second job exists because those 12 tests cover the rule that decides **which
+model version serves traffic**, on both modalities — too important to be
+exercised only on a laptop. It pays the mlflow install so they actually run, and
+it deliberately applies **no marker filter**: filtering on `-m slow` would let a
+test whose marker someone forgot run in neither job and vanish from CI silently.
+Its mlflow pin is read out of `requirements.txt` at run time, never written into
+the workflow, so it cannot drift.
 
 `scripts/check_ci_pins.py` runs **before** the install and fails if the two files
 ever disagree on a version — a subset is only trustworthy if it cannot drift.
@@ -419,8 +431,10 @@ ever disagree on a version — a subset is only trustworthy if it cannot drift.
 ## Contributing
 
 1. **Branch off `main`**: `git checkout -b your-feature`.
-2. **Run `make test` before opening a PR.** CI runs the same tests, minus the
-   ones needing mlflow.
+2. **Run `make test` before opening a PR** — it runs all 57. Use
+   `make test-fast` (`-m "not slow"`) during the edit loop: it skips the tests
+   that stand up a real MLflow registry, which are the bulk of the wall time.
+   CI runs everything regardless, so a fast local pass is not a green build.
 3. **Open a pull request into `main`** and wait for the check to go green.
 4. **Never commit data or secrets.** `data/`, `models/`, `reports/`, `.env`,
    `.dvc/config.local`, `nginx/.htpasswd`, `airflow/.env.airflow` and
