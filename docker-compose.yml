@@ -65,9 +65,29 @@ services:
       - "8001"
     command: ["uvicorn", "api.text_main:app", "--host", "0.0.0.0", "--port", "8001"]
     volumes:
-      # READ-ONLY: this service only ever loads the two .pkl files. It has no
-      # training endpoint, so it has no business writing to models/.
+      # READ-ONLY, and it stays read-only now that this service is
+      # registry-aware: MLflow downloads a registered version to a temp dir
+      # (mlflow.utils.file_utils.create_tmp_dir falls through to
+      # tempfile.mkdtemp(), i.e. /tmp in this container — verified in the
+      # installed mlflow 3.14.0 source), never into models/. This mount is only
+      # the LOCAL FALLBACK used when the registry is unreachable.
       - ./models:/app/models:ro
+    # Registry-aware serving needs the DagsHub MLflow credentials at RUNTIME.
+    # Without this the container has no MLFLOW_TRACKING_URI, so it would fall
+    # back to the local .pkl files forever while looking like it resolves an
+    # alias — the exact failure this step exists to remove.
+    #
+    # FOLLOW-UP (least privilege): .env also carries ENS_USERNAME/ENS_PASSWORD,
+    # which this service never uses. Passing only what it needs looks like:
+    #   environment:
+    #     - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}
+    #     - MLFLOW_TRACKING_USERNAME=${MLFLOW_TRACKING_USERNAME}
+    #     - MLFLOW_TRACKING_PASSWORD=${MLFLOW_TRACKING_PASSWORD}
+    # Not done here because compose's interpolation from ./.env could not be
+    # verified in the sandbox, and env_file is the mechanism already proven on
+    # the `api` service.
+    env_file:
+      - .env
     restart: unless-stopped
 
     # PROVISIONAL — NOT MEASURED. The artifacts are tiny (0.5 MB vectorizer +
