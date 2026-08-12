@@ -55,9 +55,44 @@ def list_versions(client, name: str, alias: str) -> None:
     print(f"Registered model: {name}   alias '{alias}' -> "
           f"{'v' + promoted if promoted else '(unset)'}\n")
     for v in versions:
-        marker = "  <-- SERVING" if v.version == promoted else ""
+        marker = "  <-- SERVING" if str(v.version) == str(promoted) else ""
         tags = ", ".join(f"{k}={val}" for k, val in sorted(v.tags.items())) or "-"
         print(f"  v{v.version}  run={str(v.run_id)[:8]}  {tags}{marker}")
+
+
+def _actor() -> str:
+    """Who is doing this. RAKUTEN_PROMOTED_BY wins so a CI job or a DAG can
+    name itself instead of reporting whatever the container's user happens to
+    be."""
+    override = os.getenv("RAKUTEN_PROMOTED_BY")
+    if override:
+        return override
+    try:
+        import getpass
+        return getpass.getuser()
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def _tag(client, name: str, version: str, tags: dict) -> None:
+    """Best-effort tagging, ONE TAG AT A TIME.
+
+    Called only AFTER the alias has already moved. A rejected tag must never
+    turn a completed promotion into a failure — the serving change is real
+    whether or not the audit tag stuck, and exiting here would leave the
+    operator believing nothing happened. Failures are printed, not raised.
+    """
+    for key, value in tags.items():
+        try:
+            client.set_model_version_tag(name, version, key, str(value))
+        except Exception as exc:  # noqa: BLE001
+            print(f"⚠️  Could not tag v{version} {key}={value} "
+                  f"({type(exc).__name__}) — the alias DID move.")
+
+
+def _utc_now() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def promote(client, name: str, alias: str, version: str) -> None:
@@ -88,20 +123,53 @@ def promote(client, name: str, alias: str, version: str) -> None:
     # Read back rather than trusting the write: an alias that silently did not
     # move would mean serving stays on the old model while we believe otherwise.
     now = _current_alias_version(client, name, alias)
-    if now != str(version):
+    # str() on BOTH sides: MLflow 3.14.0 returns ModelVersion.version as an int
+    # against a local backend, while DagsHub's REST layer returns a string. A
+    # bare `!=` therefore aborts here AFTER the alias has already moved —
+    # telling the operator the promotion failed when it succeeded. Caught by
+    # tests/test_promote.py running against a real local registry.
+    if str(now) != str(version):
         sys.exit(f"❌ Alias did not move (reads back as {now!r}).")
     moved = f"v{previous} -> v{version}" if previous else f"-> v{version}"
     print(f"🏷️  '{alias}' {moved} on '{name}'.")
+
+    # THE AUDIT TRAIL. Moving an alias is DESTRUCTIVE: MLflow removes it from
+    # the old version and keeps no history, so without these tags "what was in
+    # production last Tuesday, and who put it there?" is unanswerable. Verified
+    # directly against MLflow 3.14.0: re-pointing an alias leaves the previous
+    # version's alias list empty.
+    when, who = _utc_now(), _actor()
+    _tag(client, name, str(version), {
+        "promoted_at": when,
+        "promoted_by": who,
+        "promoted_from": f"v{previous}" if previous else "none",
+        "promoted_alias": alias,
+    })
+    if previous and str(previous) != str(version):
+        _tag(client, name, str(previous), {
+            "demoted_at": when,
+            "demoted_by": who,
+            "demoted_to": f"v{version}",
+        })
+
     print("ℹ️  Restart the API process for the change to take effect "
           "(the served model is cached for the process lifetime).")
 
 
 def demote(client, name: str, alias: str) -> None:
-    if _current_alias_version(client, name, alias) is None:
+    losing = _current_alias_version(client, name, alias)
+    if losing is None:
         sys.exit(f"❌ Alias '{alias}' is not set on '{name}'.")
     client.delete_registered_model_alias(name, alias)
     print(f"🏷️  Removed alias '{alias}' from '{name}'. Serving falls back to "
           f"the newest version on the next API restart.")
+    # Same reasoning as promote(): the deletion leaves no trace on the version,
+    # so without this the record would show a promotion that never ended.
+    _tag(client, name, str(losing), {
+        "demoted_at": _utc_now(),
+        "demoted_by": _actor(),
+        "demoted_to": "(alias removed)",
+    })
 
 
 def main() -> None:
