@@ -25,6 +25,8 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 
+from rakuten_common import registry as shared_registry
+
 from . import config
 
 
@@ -139,28 +141,13 @@ def resolve_registry_version(client, name: str, alias: Optional[str] = None):
     """Pick which registered version to serve: the one carrying `alias` if that
     alias resolves, otherwise the highest version number.
 
-    Returns (version_object, source_string). Raises LookupError only when the
-    registered model has no versions at all.
-
-    Split out from load_from_registry() so the selection rule — the part with
-    the actual decision in it — is testable without a network, a real MLflow
-    server, or a 4 MB artifact download.
+    MOVED to rakuten_common.registry so the text modality applies the same rule
+    instead of growing a second copy that can drift. This name is kept as a
+    re-export: it is the documented entry point and existing callers use it.
+    The behaviour is unchanged — see tests/test_registry.py, which pins it
+    against a real MLflow registry.
     """
-    alias = alias or config.PRODUCTION_ALIAS
-    try:
-        mv = client.get_model_version_by_alias(name, alias)
-        return mv, f"registry:{name}@{alias}/v{mv.version}"
-    except Exception as exc:  # noqa: BLE001
-        # No alias set yet (fresh registry), a typo'd alias, or a backend that
-        # does not implement aliases. All three mean the same thing here: fall
-        # back to newest-version behaviour rather than failing to serve.
-        print(f"ℹ️  No '{alias}' alias on '{name}' ({type(exc).__name__}) — "
-              f"falling back to the newest version.")
-    versions = client.search_model_versions(f"name='{name}'")
-    if not versions:
-        raise LookupError(f"No versions of '{name}' in the MLflow registry.")
-    latest = max(versions, key=lambda v: int(v.version))
-    return latest, f"registry:{name}/v{latest.version} (unpromoted)"
+    return shared_registry.resolve_registry_version(client, name, alias)
 
 
 def load_from_registry(alias: Optional[str] = None) -> dict:
