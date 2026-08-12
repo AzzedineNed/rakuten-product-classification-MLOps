@@ -16,6 +16,12 @@ identically from an operator's point of view:
 
 Text registers under its own model name and its own experiment, so image, text
 and (later) fusion runs share a tracking server without colliding.
+
+ONE DELIBERATE EXCEPTION to "nothing in here may raise": load_from_registry.
+It is a SERVING-side loader, not a training step, and it must be able to say
+"I could not get the registered model" so its caller can fall back to the local
+artifact. Mirrors rakuten_img.classifier.load_from_registry, which raises for
+exactly the same reason.
 """
 from __future__ import annotations
 
@@ -29,6 +35,7 @@ __all__ = [
     "enabled",
     "log_training_run",
     "register_model",
+    "load_from_registry",
     "attach_evaluation",
 ]
 
@@ -37,6 +44,21 @@ def enabled() -> bool:
     """Gate on the tracking URI, so a fresh clone / CI / offline work trains
     normally with no tracking side effects."""
     return bool(os.getenv("MLFLOW_TRACKING_URI"))
+
+
+# How long a SERVING process may block on an unreachable registry before giving
+# up and using the local artifacts. MLflow's shipped defaults are tuned for
+# batch jobs riding out rate limits: 7 retries with an exponential backoff and a
+# 120s per-request timeout, which its own source comments as "~4 minutes" — and
+# resolving an alias costs TWO requests when the alias lookup fails, so a dead
+# tracking server can block a container's startup for the better part of ten
+# minutes. That turns "degrade to the local model" into a boot hang, and with
+# docker-compose's `depends_on: service_healthy` it would hold the whole stack
+# down. These are setdefault, not assignment: an operator can still raise them.
+_SERVING_HTTP_LIMITS = {
+    "MLFLOW_HTTP_REQUEST_MAX_RETRIES": "2",
+    "MLFLOW_HTTP_REQUEST_TIMEOUT": "10",
+}
 
 
 def _set_experiment(mlflow) -> None:
@@ -120,6 +142,69 @@ def register_model(run_id: Optional[str],
     except Exception as exc:  # noqa: BLE001
         print(f"⚠️  Model registration skipped ({type(exc).__name__}: {exc}).")
         return None
+
+
+def load_from_registry(alias: Optional[str] = None):
+    """Download the registered version that should serve traffic and load BOTH
+    artifacts from it.
+
+    Returns (vectorizer, model, source_string), where source_string is the one
+    produced by rakuten_common.registry — "registry:NAME@alias/vN" for a
+    deliberate promotion, "registry:NAME/vN (unpromoted)" for a fallback to the
+    newest version — so /health can show an operator which it is.
+
+    RAISES on every failure (no tracking URI, no versions, network down, a
+    version whose artifacts are the wrong shape). The CALLER decides the
+    fallback; see TfidfPredictor.load(prefer_registry=True), which falls back to
+    the local .pkl files so serving never hard-fails.
+
+    WHY THIS IS NOT rakuten_img.classifier.load_from_registry: a text version's
+    source is a DIRECTORY holding tfidf_vectorizer.pkl + logistic_regression.pkl
+    (see register_model above), not a single joblib payload. Verified against
+    real MLflow 3.14.0: download_artifacts() on such a source returns a
+    directory containing both files.
+    """
+    if not enabled():
+        raise RuntimeError("MLFLOW_TRACKING_URI not set — registry unavailable.")
+
+    # Must happen BEFORE the mlflow import/first request; see _SERVING_HTTP_LIMITS.
+    for key, value in _SERVING_HTTP_LIMITS.items():
+        os.environ.setdefault(key, value)
+
+    import joblib
+    import mlflow
+    from mlflow import MlflowClient
+
+    from rakuten_common.registry import resolve_registry_version
+
+    name = config.REGISTERED_MODEL_NAME
+    client = MlflowClient()
+    version, source = resolve_registry_version(client, name, alias)
+
+    local_dir = Path(mlflow.artifacts.download_artifacts(version.source))
+    if not local_dir.is_dir():
+        raise NotADirectoryError(
+            f"Version {version.version} of '{name}' points at {local_dir}, which "
+            "is not a directory. A text version must be the 'model/' directory "
+            "holding both .pkl files."
+        )
+
+    # Filenames come from config, so a rename cannot silently desynchronise the
+    # writer (train.py) from this reader.
+    vectorizer_file = local_dir / config.VECTORIZER_PATH.name
+    model_file = local_dir / config.MODEL_PATH.name
+    missing = [p.name for p in (vectorizer_file, model_file) if not p.exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"Version {version.version} of '{name}' is missing {missing} in "
+            f"{local_dir} (found: {sorted(p.name for p in local_dir.iterdir())}). "
+            "A text version needs BOTH files."
+        )
+
+    vectorizer = joblib.load(vectorizer_file)
+    model = joblib.load(model_file)
+    print(f"📦 Loaded '{name}' v{version.version} from the MLflow registry.")
+    return vectorizer, model, source
 
 
 def attach_evaluation(run_id: Optional[str], metrics: dict,

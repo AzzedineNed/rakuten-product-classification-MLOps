@@ -18,6 +18,12 @@ model is a 0.5 MB vectorizer plus a 2.2 MB estimator, so paying that at boot
 buys a fast, predictable first request. A missing model does NOT stop the
 service from starting -- /health reports it, mirroring the image side.
 
+WHERE THE MODEL COMES FROM: the MLflow registry when it is reachable (the
+version carrying the production alias, else the newest one), the local .pkl
+files otherwise. Resolved ONCE at startup and reported by /health as
+model_source, so "which model is serving?" has an answer that is read from the
+running process rather than inferred from what is on disk.
+
 Run:
   uvicorn api.text_main:app --host 0.0.0.0 --port 8001
 """
@@ -50,12 +56,27 @@ predictor = TfidfPredictor()
 async def lifespan(app: FastAPI):
     """Load the model at startup. A failure is logged, not raised: the service
     still starts and /health reports model_loaded=false, so an orchestrator
-    gets a truthful answer instead of a container that will not boot."""
+    gets a truthful answer instead of a container that will not boot.
+
+    prefer_registry=True is what makes this service registry-aware: the version
+    carrying the production alias, else the newest registered version, else the
+    local .pkl files. The fallback is inside load(), so a missing or unreachable
+    registry degrades to local serving instead of failing to boot.
+
+    EAGER AND ONCE. The registry is consulted exactly here, at startup — never
+    per request. A promotion therefore takes effect on restart, which is the
+    same deal the image service offers, and means a registry outage cannot slow
+    down or break traffic that is already being served.
+
+    Catching Exception, not just FileNotFoundError: a corrupt artifact used to
+    take the container down at boot, which contradicts the promise in the first
+    paragraph. Now every load failure lands in /health where it can be seen.
+    """
     try:
-        predictor.load()
-        logger.info("Text model loaded — API ready.")
-    except FileNotFoundError as exc:
-        logger.error("Could not load the text model: %s", exc)
+        predictor.load(prefer_registry=True)
+        logger.info("Text model loaded from %s — API ready.", predictor.serving_source)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Could not load the text model: %s: %s", type(exc).__name__, exc)
     yield
 
 
@@ -106,10 +127,19 @@ def _unavailable() -> Optional[JSONResponse]:
 
 @app.get("/health")
 def health():
+    """model_source is the AUTHORITATIVE answer to "which model is being
+    served": "registry:NAME@production/vN" for a deliberate promotion,
+    "registry:NAME/vN (unpromoted)" when no alias is set, "local:<file>" when
+    the registry was unavailable, "not-loaded" if nothing loaded at all.
+
+    model_path is kept for continuity but is NOT that answer — it is only the
+    local path this service would fall back to. Read model_source.
+    """
     return {
         "status": "ok",
         "modality": "text",
         "model_loaded": predictor.is_loaded,
+        "model_source": predictor.serving_source,
         "model_path": str(predictor.model_path),
         "num_classes": config.NUM_CLASSES,
         "registered_model": config.REGISTERED_MODEL_NAME,
