@@ -187,14 +187,31 @@ def entrainer(args):
     return metrics
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
+    """The CLI definition, split out of main() so a NON-command-line caller can
+    obtain exactly the same defaults.
+
+    api/text_main.py's /train endpoint calls build_parser().parse_args([]) to
+    build the Namespace entrainer() expects. It must not call main(): main()
+    parses sys.argv, which under uvicorn holds the SERVER's arguments, and
+    argparse then raises SystemExit — which `except Exception` does NOT catch,
+    wedging the job status on "running" forever. api/image_main.py documents the
+    same trap for process.main() and evaluate.main().
+
+    Going through the parser rather than hand-building a namespace means a new
+    argument with a default is picked up by the endpoint automatically, instead
+    of surfacing as an AttributeError at run time.
+    """
     parser = argparse.ArgumentParser(
         description="Entraînement TF-IDF + Régression Logistique (modalité texte)")
     parser.add_argument("--max-features", type=int,
                         default=config.TFIDF_PARAMS["max_features"],
                         help="Nombre max de features TF-IDF (défaut : 10000)")
-    args = parser.parse_args()
-    entrainer(args)
+    return parser
+
+
+def main():
+    entrainer(build_parser().parse_args())
 
 
 if __name__ == "__main__":

@@ -364,3 +364,201 @@ def test_the_probability_vector_follows_the_canonical_class_order(monkeypatch):
     assert classes == sorted(classes)
     assert len(classes) == len(body["probabilities"]) == 27
     assert body["prediction"]["prdtypecode"] == classes[0]
+
+
+# --------------------------------------------------------------------------- #
+# Training and evaluation endpoints
+#
+# The real jobs are never run here: they need the dataset, minutes of CPU and
+# the registry. What IS tested is everything around them — the 409 guard, the
+# status lifecycle, what reaches the status dict on failure, and the argparse
+# trap that would wedge a job on "running" forever.
+# --------------------------------------------------------------------------- #
+@pytest.fixture(autouse=True)
+def _reset_job_state():
+    """_TRAIN_STATUS and _EVAL_STATUS are module globals that outlive a request.
+    Without this the first test to leave one "running" would 409 every later
+    test in the file."""
+    idle = {"state": "idle", "detail": None, "metrics": None}
+    tm._TRAIN_STATUS.clear(), tm._TRAIN_STATUS.update(idle)
+    tm._EVAL_STATUS.clear(), tm._EVAL_STATUS.update(idle)
+    yield
+    tm._TRAIN_STATUS.clear(), tm._TRAIN_STATUS.update(idle)
+    tm._EVAL_STATUS.clear(), tm._EVAL_STATUS.update(idle)
+
+
+def test_status_endpoints_start_idle(monkeypatch):
+    with _client(monkeypatch, loaded=True) as client:
+        assert client.get("/train/status").json() == {
+            "state": "idle", "detail": None, "metrics": None}
+        assert client.get("/evaluate/status").json() == {
+            "state": "idle", "detail": None, "metrics": None}
+
+
+def test_train_accepts_and_returns_where_to_poll(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tm, "_run_training", lambda: calls.append("train"))
+    with _client(monkeypatch, loaded=True) as client:
+        response = client.post("/train")
+    assert response.status_code == 200
+    assert response.json() == {"status": "started", "poll": "/train/status"}
+    assert calls == ["train"]
+
+
+def test_evaluate_accepts_and_returns_where_to_poll(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tm, "_run_evaluation", lambda: calls.append("evaluate"))
+    with _client(monkeypatch, loaded=True) as client:
+        response = client.post("/evaluate")
+    assert response.status_code == 200
+    assert response.json() == {"status": "started", "poll": "/evaluate/status"}
+    assert calls == ["evaluate"]
+
+
+@pytest.mark.parametrize("busy_key, path, blocked", [
+    ("_TRAIN_STATUS", "/train", "train"),
+    ("_TRAIN_STATUS", "/evaluate", "train"),
+    ("_EVAL_STATUS", "/train", "evaluate"),
+    ("_EVAL_STATUS", "/evaluate", "evaluate"),
+])
+def test_the_two_jobs_are_mutually_exclusive(monkeypatch, busy_key, path, blocked):
+    """Both jobs are CPU-bound on two cores and both write into models/text and
+    reports/text, so a second one must be refused rather than queued."""
+    monkeypatch.setattr(tm, "_run_training", lambda: None)
+    monkeypatch.setattr(tm, "_run_evaluation", lambda: None)
+    getattr(tm, busy_key)["state"] = "running"
+
+    with _client(monkeypatch, loaded=True) as client:
+        response = client.post(path)
+
+    assert response.status_code == 409
+    assert response.json() == {"error": f"A '{blocked}' job is already running."}
+
+
+def test_training_records_metrics_on_success(monkeypatch):
+    fake = {"f1_weighted": 0.78, "accuracy": 0.77, "n_train": 100}
+
+    class FakeScript:
+        @staticmethod
+        def build_parser():
+            import argparse
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--max-features", type=int, default=10000)
+            return parser
+
+        @staticmethod
+        def entrainer(args):
+            assert args.max_features == 10000   # defaults, not uvicorn's argv
+            return fake
+
+    monkeypatch.setitem(sys.modules, "train_text", FakeScript)
+    tm._run_training()
+
+    assert tm._TRAIN_STATUS["state"] == "done"
+    assert tm._TRAIN_STATUS["metrics"] == fake
+    assert tm._TRAIN_STATUS["detail"] == "completed"
+
+
+def test_a_training_failure_is_reported_not_swallowed(monkeypatch):
+    class FakeScript:
+        @staticmethod
+        def build_parser():
+            import argparse
+            return argparse.ArgumentParser()
+
+        @staticmethod
+        def entrainer(args):
+            raise ValueError("dataset missing")
+
+    monkeypatch.setitem(sys.modules, "train_text", FakeScript)
+    tm._run_training()
+
+    assert tm._TRAIN_STATUS["state"] == "failed"
+    assert "ValueError: dataset missing" in tm._TRAIN_STATUS["detail"]
+
+
+@pytest.mark.parametrize("runner, status_name, module", [
+    ("_run_training", "_TRAIN_STATUS", "train_text"),
+    ("_run_evaluation", "_EVAL_STATUS", "evaluate_text"),
+])
+def test_a_systemexit_does_not_wedge_the_job_on_running(monkeypatch, runner,
+                                                        status_name, module):
+    """THE TRAP THIS GUARDS. SystemExit does not derive from Exception, so an
+    `except Exception` would let argparse — or any sys.exit — kill the
+    background task silently, leaving the status on "running" forever. The DAG
+    could then only ever report a timeout, hours later."""
+    class FakeScript:
+        """Raises from the WORK function, not build_parser: in
+        `script.entrainer(script.build_parser().parse_args([]))` Python looks up
+        the entrainer attribute before it calls build_parser, so a fake missing
+        it fails with AttributeError and never reaches the path under test.
+        Learned by running this test rather than reasoning about it."""
+        @staticmethod
+        def build_parser():
+            import argparse
+            return argparse.ArgumentParser()
+
+        @staticmethod
+        def entrainer(args):
+            raise SystemExit(2)
+
+        @staticmethod
+        def evaluer(args):
+            raise SystemExit(2)
+
+    monkeypatch.setitem(sys.modules, module, FakeScript)
+    getattr(tm, runner)()
+
+    status = getattr(tm, status_name)
+    assert status["state"] == "failed"
+    assert "SystemExit" in status["detail"]
+
+
+def test_evaluation_records_metrics_on_success(monkeypatch):
+    fake = {"f1_weighted": 0.7780, "accuracy": 0.7768}
+
+    class FakeScript:
+        @staticmethod
+        def build_parser():
+            import argparse
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--split", default="test")
+            parser.add_argument("--predict-test", action="store_true")
+            return parser
+
+        @staticmethod
+        def evaluer(args):
+            # The endpoint must score the TEST split and must NOT generate the
+            # submission predictions — both are argparse defaults.
+            assert args.split == "test"
+            assert args.predict_test is False
+            return fake
+
+    monkeypatch.setitem(sys.modules, "evaluate_text", FakeScript)
+    tm._run_evaluation()
+
+    assert tm._EVAL_STATUS["state"] == "done"
+    assert tm._EVAL_STATUS["metrics"] == fake
+
+
+def test_a_running_job_is_visible_through_the_status_endpoint(monkeypatch):
+    """The DAG polls this; it must show "running" before it shows "done"."""
+    seen = []
+
+    class FakeScript:
+        @staticmethod
+        def build_parser():
+            import argparse
+            return argparse.ArgumentParser()
+
+        @staticmethod
+        def entrainer(args):
+            seen.append(dict(tm._TRAIN_STATUS))
+            return {"f1_weighted": 1.0}
+
+    monkeypatch.setitem(sys.modules, "train_text", FakeScript)
+    tm._run_training()
+
+    assert seen[0]["state"] == "running"
+    assert seen[0]["detail"] == "tfidf + logreg"
+    assert tm._TRAIN_STATUS["state"] == "done"

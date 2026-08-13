@@ -37,8 +37,11 @@ from typing import List, Optional
 
 # Make the src packages importable without install / PYTHONPATH.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+# scripts/ too, for the training and evaluation entry points the endpoints
+# below drive. Same two lines api/image_main.py uses.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from fastapi import FastAPI, Response
+from fastapi import BackgroundTasks, FastAPI, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -52,6 +55,31 @@ logger = logging.getLogger("api-text")
 
 predictor = TfidfPredictor()
 METRICS = ServiceMetrics("text")
+
+# Job state for /train and /evaluate. IN-MEMORY AND PER-PROCESS, exactly like
+# the image service's: an API restart resets these to "idle", and the Airflow
+# polling loop treats "idle" while polling as an error. That is a known wart on
+# the image side and it is duplicated here DELIBERATELY — two services behaving
+# identically when both are wrong is easier to fix once than two services
+# behaving differently. Fixing it means persisting job state somewhere both
+# services read, which is a bigger change than this one.
+_TRAIN_STATUS: dict = {"state": "idle", "detail": None, "metrics": None}
+_EVAL_STATUS: dict = {"state": "idle", "detail": None, "metrics": None}
+
+
+def _busy() -> str | None:
+    """Which job is running, if any.
+
+    /train and /evaluate are mutually exclusive: both are CPU-bound on a 2-core
+    laptop and both write into models/text and reports/text. Note this guard is
+    PER SERVICE — nothing here prevents an image retrain running at the same
+    time as a text retrain.
+    """
+    if _TRAIN_STATUS["state"] == "running":
+        return "train"
+    if _EVAL_STATUS["state"] == "running":
+        return "evaluate"
+    return None
 
 
 @asynccontextmanager
@@ -202,3 +230,95 @@ def predict_batch(batch: ProduitBatch, top_k: int = 5):
     except Exception as exc:  # noqa: BLE001
         logger.exception("Batch prediction failed")
         return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
+# --------------------------------------------------------------------------- #
+# Training and evaluation
+#
+# WHY THESE LIVE ON THE SERVING PROCESS AT ALL. They do not belong here: a
+# production system runs training as a job on a worker, not as a route on the
+# process answering user traffic. They are here because Airflow is deliberately
+# kept away from the Docker daemon (no docker.sock, no sklearn in the Airflow
+# image — see the image DAG's docstring), so HTTP is the only channel the
+# orchestrator has. This is a considered trade-off on a laptop, not a pattern
+# to copy. The consequence to remember: a retrain competes for memory with live
+# prediction inside one uvicorn worker.
+# --------------------------------------------------------------------------- #
+def _run_training() -> None:
+    _TRAIN_STATUS.update(state="running", detail="tfidf + logreg", metrics=None)
+    try:
+        # Imported here, not at module level: the idle container should not pay
+        # for pandas and scikit-learn until something actually asks to train.
+        import train_text as train_script  # scripts/train_text.py
+
+        # parse_args([]) — NOT main(), and NOT a hand-built namespace. main()
+        # would parse uvicorn's argv and raise SystemExit; a hand-built
+        # namespace would rot the moment the script grew an argument.
+        metrics = train_script.entrainer(train_script.build_parser().parse_args([]))
+        _TRAIN_STATUS.update(state="done", metrics=metrics, detail="completed")
+    except (Exception, SystemExit) as exc:  # noqa: BLE001
+        # SystemExit is caught EXPLICITLY because it does not derive from
+        # Exception. Anything that reaches argparse or calls sys.exit would
+        # otherwise kill the background task silently and wedge the status on
+        # "running" forever, which the DAG can only report as a timeout.
+        _TRAIN_STATUS.update(state="failed", detail=f"{type(exc).__name__}: {exc}")
+
+
+@app.post("/train")
+def train_endpoint(background_tasks: BackgroundTasks):
+    """Retrain the text model in the background and return immediately.
+
+    Takes no parameters on purpose. scripts/train_text.py exposes
+    --max-features, but exposing a knob on an authenticated, publicly routed
+    endpoint that nothing in the pipeline sets is surface without a caller. The
+    hyperparameters live in rakuten_text.config; change them there.
+
+    Registers a NEW VERSION and stops. The production alias is never moved here
+    — promotion stays a deliberate human act, the same deal the image side
+    offers, and the reason the registry work exists at all.
+    """
+    running = _busy()
+    if running:
+        return JSONResponse(status_code=409,
+                            content={"error": f"A '{running}' job is already running."})
+    background_tasks.add_task(_run_training)
+    return {"status": "started", "poll": "/train/status"}
+
+
+@app.get("/train/status")
+def train_status():
+    return _TRAIN_STATUS
+
+
+def _run_evaluation() -> None:
+    _EVAL_STATUS.update(state="running", detail="scoring the test split", metrics=None)
+    try:
+        import evaluate_text as evaluate_script  # scripts/evaluate_text.py
+
+        metrics = evaluate_script.evaluer(
+            evaluate_script.build_parser().parse_args([]))
+        _EVAL_STATUS.update(state="done", metrics=metrics, detail="completed")
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 - see _run_training
+        _EVAL_STATUS.update(state="failed", detail=f"{type(exc).__name__}: {exc}")
+
+
+@app.post("/evaluate")
+def evaluate_endpoint(background_tasks: BackgroundTasks):
+    """Score the LOCAL text model on the shared held-out test split.
+
+    Scores what scripts/train_text.py last wrote to models/text, not whatever
+    the registry's production alias points at. That is what an orchestrated
+    train -> evaluate chain needs: metrics that describe the model just trained,
+    not the one currently being served.
+    """
+    running = _busy()
+    if running:
+        return JSONResponse(status_code=409,
+                            content={"error": f"A '{running}' job is already running."})
+    background_tasks.add_task(_run_evaluation)
+    return {"status": "started", "poll": "/evaluate/status"}
+
+
+@app.get("/evaluate/status")
+def evaluate_status():
+    return _EVAL_STATUS

@@ -226,15 +226,26 @@ def evaluer(args):
     return metrics
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
+    """The CLI definition, split out of main(). See the twin in
+    scripts/train_text.py for why the /evaluate endpoint goes through the parser
+    instead of calling main() or hand-building a Namespace.
+
+    The defaults matter here: parse_args([]) yields split="test" and
+    predict_test=False, so the endpoint scores the same split the host command
+    scores, and does not generate the Kaggle-style submission predictions.
+    """
     parser = argparse.ArgumentParser(
         description="Évaluation TF-IDF + Régression Logistique (modalité texte)")
     parser.add_argument("--split", choices=("val", "test"), default="test",
                         help="Split partagé à scorer (défaut : test)")
     parser.add_argument("--predict-test", action="store_true",
                         help="Générer aussi les prédictions sur X_test_update.csv")
-    args = parser.parse_args()
-    evaluer(args)
+    return parser
+
+
+def main():
+    evaluer(build_parser().parse_args())
 
 
 if __name__ == "__main__":
