@@ -112,7 +112,8 @@ rakuten-image-mlops/
 │   ├── split.py               # THE split: load, split, split_labels
 │   ├── contract.py            # to_canonical(), validate_vector()
 │   ├── features.py            # cached-feature row -> productid mapping, re-verified
-│   └── fusion.py              # weighted_average(), DEFAULT_TEXT_WEIGHT = 0.85
+│   ├── fusion.py              # weighted_average(), DEFAULT_TEXT_WEIGHT = 0.85
+│   └── observability.py       # pure-ASGI Prometheus middleware (no fastapi import)
 ├── src/rakuten_img/           # image modality
 │   ├── config.py  images.py  data.py
 │   ├── backbone.py            # frozen MobileNetV2 (the only module importing torch)
@@ -133,9 +134,12 @@ rakuten-image-mlops/
 ├── api/text_main.py           # FastAPI :8001  /predict /predict/batch /health
 ├── api/gateway_main.py        # FastAPI :8002  /predict (fusion) /health
 ├── nginx/default.conf         # the only public entrypoint
+├── prometheus/prometheus.yml  # scrape config (bind-mounted, needs a restart to reload)
+├── grafana/provisioning/      # datasource + dashboard provider, read-only
+├── grafana/dashboards/        # dashboard JSON, versioned here not in Grafana's DB
 ├── airflow/dags/              # rakuten_image_pipeline
 ├── .github/workflows/tests.yml
-├── tests/                     # 57 tests, torch-free and data-free
+├── tests/                     # 79 tests, torch-free and data-free
 └── requirements.txt  requirements-ci.txt  pytest.ini  Dockerfile  docker-compose*.yml  Makefile
 ```
 
@@ -156,7 +160,7 @@ pip install -r requirements.txt
 Run the tests (need neither torch nor data):
 
 ```bash
-make test             # 57 tests
+make test             # 79 tests
 ```
 
 > **Pins are load-bearing.** `numpy` stays `<2` because torch 2.2.2 requires it,
@@ -224,11 +228,19 @@ the `proxy_pass` target.
 | `/` `/predict` `/train` `/evaluate` | image service | unchanged legacy paths; the Airflow DAG drives these |
 | `/text/…` | text service | prefix stripped |
 | `/fusion/…` | gateway | prefix stripped; fans out to both services |
+| `/grafana/…` | Grafana | prefix **preserved** — Grafana serves under the sub-path |
+| `/prometheus/…` | Prometheus | prefix stripped; **basic auth** |
 
-`/text` and `/fusion` without the trailing slash 301-redirect to the slashed
-form. Basic auth guards `/train`, `/train/status`, `/evaluate`,
-`/evaluate/status`. Rate limits are per-IP: 10r/s general (burst 20), 1r/s on
-train (burst 5), `limit_req_status 429`. Body cap 10 MB.
+`/text`, `/fusion`, `/grafana` and `/prometheus` without the trailing slash
+301-redirect to the slashed form. Basic auth guards `/train`, `/train/status`,
+`/evaluate`, `/evaluate/status` and `/prometheus/`. Rate limits are per-IP:
+10r/s general (burst 20), 1r/s on train (burst 5), 30r/s on the monitoring UIs
+(burst 60), `limit_req_status 429`. Body cap 10 MB.
+
+**Note the trailing-slash asymmetry.** `/text/`, `/fusion/` and `/prometheus/`
+strip their prefix (trailing slash on `proxy_pass`); `/grafana/` does **not**,
+because Grafana runs with `GF_SERVER_SERVE_FROM_SUB_PATH=true` and expects to
+receive the prefix. Getting this backwards 404s every asset.
 
 ```bash
 curl -s -F "file=@product.jpg" "http://localhost/predict?top_k=3"
@@ -319,6 +331,78 @@ excluded by `.dockerignore`, so credentials are never baked into image layers.
 
 ---
 
+## Monitoring (Prometheus + Grafana)
+
+All three services expose `/metrics`. Prometheus scrapes them every 15s over the
+compose network and Grafana renders one provisioned dashboard. Neither publishes
+a host port — both are reached through nginx.
+
+| URL | auth |
+|---|---|
+| `http://localhost/grafana/` | Grafana's own login (`GRAFANA_ADMIN_*` from `.env`) |
+| `http://localhost/prometheus/` | nginx basic auth (`nginx/.htpasswd`) |
+
+**There are three different passwords in this stack.** They are not
+interchangeable and mixing them up costs time:
+
+| password | lives in | opens |
+|---|---|---|
+| nginx basic auth | `nginx/.htpasswd` (hashed, unreadable) | `/train`, `/evaluate`, `/prometheus/` |
+| Grafana admin | `GRAFANA_ADMIN_PASSWORD` in `.env` | the Grafana login page |
+| DagsHub token | `MLFLOW_TRACKING_PASSWORD` in `.env` | MLflow tracking + DVC remote |
+
+Reset the first with `printf "admin:$(openssl passwd -apr1)\n" > nginx/.htpasswd`
+(it prompts; run it on its own line). The file stores only a hash, so a
+forgotten password can only be replaced, never recovered.
+
+### What is measured
+
+| metric | labels | what it answers |
+|---|---|---|
+| `rakuten_http_requests_total` | `service, method, path, status` | traffic and error rate |
+| `rakuten_http_request_duration_seconds` | `service, method, path` | latency (buckets to 120s) |
+| `rakuten_predictions_total` | `service, prdtypecode` | what the system predicts, per class |
+| `rakuten_prediction_confidence` | `service` | how confident it is |
+| `rakuten_model_info` | `service, modality, source` | **which model each service is serving** |
+| `rakuten_upstream_failures_total` | `service, upstream` | gateway calls that failed |
+| `rakuten_fusion_requests_total` | `service, modalities, fused, degraded` | how often one modality is silently missing |
+
+`rakuten_model_info` is the dashboard counterpart of `/health`'s `model_source`:
+it reads from the running process, not from disk. The image service reports
+`not-loaded` until its first real `/predict`, which is the documented lazy-load
+wart, not a fault.
+
+The `path` label is always the **route template** (`/predict`), never the raw
+URL, and anything unmatched is recorded as `unmatched`. That is deliberate:
+labelling by raw path would let any caller mint unbounded label values by
+requesting random URLs, which is how a Prometheus server gets killed.
+
+### Instrumentation design
+
+`rakuten_common/observability.py` is **pure ASGI** and imports no fastapi, so its
+tests run in both CI jobs with only `prometheus-client` added to
+`requirements-ci.txt`. A test that imported `api/` would skip in *both* jobs and
+vanish from CI silently. It uses `prometheus-client` alone rather than
+`prometheus-fastapi-instrumentator`, whose current release requires
+`starlette>=1.0.0` and breaks `fastapi==0.111.0`; `prometheus-client` has zero
+dependencies and cannot disturb a pin.
+
+### Editing the configuration
+
+Neither `prometheus/prometheus.yml` nor `grafana/provisioning/` is re-read while
+running — both are bind-mounted:
+
+```bash
+sudo docker compose restart prometheus   # after editing the scrape config
+sudo docker compose restart grafana      # after editing provisioning or a dashboard
+```
+
+Dashboards are provisioned from `grafana/dashboards/*.json` with
+`allowUiUpdates: false`. Edit the JSON and restart; changes made in the browser
+would be silently reverted, which is worse than being refused.
+
+---
+
 ## Experiment tracking & data versioning (DagsHub)
 
 One account token drives three things:
@@ -361,6 +445,10 @@ Both files are gitignored. Each person uses their own token.
 | `RAKUTEN_TEXT_EXPERIMENT` | `rakuten-text` | experiment for the text runs |
 | `MLFLOW_HTTP_REQUEST_MAX_RETRIES` | `2` when serving | capped so a dead registry cannot hang startup |
 | `MLFLOW_HTTP_REQUEST_TIMEOUT` | `10` when serving | same reason |
+| `GRAFANA_ADMIN_USER` | `admin` | Grafana login user |
+| `GRAFANA_ADMIN_PASSWORD` | **none — required** | compose refuses to start without it, rather than falling back to Grafana's `admin/admin` |
+| `GRAFANA_ROOT_URL` | `http://localhost/grafana/` | set this if you reach the host by LAN IP |
+| `PROMETHEUS_EXTERNAL_URL` | `http://localhost/prometheus/` | same reason |
 | `ENS_USERNAME` / `ENS_PASSWORD` | – | credentials for `collect.py --from-ens` |
 | `ENS_BASE` | `https://challengedata.ens.fr` | ENS site base URL |
 | `ENS_CHALLENGE_ID` | `35` | ENS challenge number |
@@ -406,16 +494,16 @@ Python 3.12, as **two jobs in parallel**:
 
 | job | installs | runs |
 |---|---|---|
-| `pytest (python 3.12, pinned)` | `requirements-ci.txt` | 45 pass, 12 skip |
-| `pytest (python 3.12, with mlflow)` | the same, plus mlflow | all 57 |
+| `pytest (python 3.12, pinned)` | `requirements-ci.txt` | 62 pass, 17 skip |
+| `pytest (python 3.12, with mlflow)` | the same, plus mlflow | all 79 |
 
 The first job installs a deliberate **subset** of `requirements.txt` that omits
 mlflow, dagshub, dvc and the API stack, none of which the tests import (every
 such import in `src/` is lazy). Measured: 128s and 995 MB for the full file
-versus 65s and 467 MB for the subset. The 12 tests that stand up a real MLflow
+versus 65s and 467 MB for the subset. The 17 tests that stand up a real MLflow
 registry `importorskip` there rather than fail.
 
-The second job exists because those 12 tests cover the rule that decides **which
+The second job exists because those 17 tests cover the rule that decides **which
 model version serves traffic**, on both modalities — too important to be
 exercised only on a laptop. It pays the mlflow install so they actually run, and
 it deliberately applies **no marker filter**: filtering on `-m slow` would let a
@@ -431,7 +519,7 @@ ever disagree on a version — a subset is only trustworthy if it cannot drift.
 ## Contributing
 
 1. **Branch off `main`**: `git checkout -b your-feature`.
-2. **Run `make test` before opening a PR** — it runs all 57. Use
+2. **Run `make test` before opening a PR** — it runs all 79. Use
    `make test-fast` (`-m "not slow"`) during the edit loop: it skips the tests
    that stand up a real MLflow registry, which are the bulk of the wall time.
    CI runs everything regardless, so a fast local pass is not a green build.
@@ -469,6 +557,24 @@ ever disagree on a version — a subset is only trustworthy if it cannot drift.
   bind-mounted-config wart above, different trigger.
 - **Train/eval status is in-memory.** An API restart resets it to `idle`, which
   the DAG's poller treats as an error.
+- **Prometheus does not reload a bind-mounted config either.** Same trap as
+  nginx: after editing `prometheus/prometheus.yml` you must
+  `docker compose restart prometheus`. The tell is that
+  `/api/v1/status/config` still shows the old file.
+- **Never set a target label that the application also exports.** The scrape
+  config originally attached `modality:` to each job, colliding with the
+  `modality` label on `rakuten_model_info`; Prometheus keeps the target's and
+  silently renames the application's to `exported_modality`. The dashboard grew
+  a duplicate column and any `by (modality)` grouping would have been grouping
+  by the wrong label. `job` already distinguishes the targets. Note that old
+  series linger for their retention, so the duplicate persists for ~5 minutes
+  after the fix.
+- **The metrics counters are in-process and reset when a container is
+  recreated.** `docker compose up -d` after a config change zeroes
+  `rakuten_predictions_total` and the fusion counters, and a counter with no
+  increments emits no series at all — so freshly-recreated services legitimately
+  show "No data" until traffic arrives. Only `rakuten_model_info` is set at
+  startup and therefore survives immediately.
 - **`models.dvc` tracks all of `models/` as one output**, so a text retrain
   invalidates the image artifacts' directory hash and vice versa. Splitting it is
   correct once the services get separate images.

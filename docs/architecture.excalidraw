@@ -975,6 +975,10 @@
         {
           "id": "arr058",
           "type": "arrow"
+        },
+        {
+          "id": "arr085",
+          "type": "arrow"
         }
       ],
       "updated": 1,
@@ -1057,6 +1061,10 @@
         {
           "id": "arrow-mlflow-textapi",
           "type": "arrow"
+        },
+        {
+          "id": "arr086",
+          "type": "arrow"
         }
       ],
       "updated": 1,
@@ -1138,6 +1146,10 @@
         },
         {
           "id": "arr056",
+          "type": "arrow"
+        },
+        {
+          "id": "arr087",
           "type": "arrow"
         }
       ],
@@ -1313,8 +1325,8 @@
       "locked": false,
       "fontSize": 14,
       "fontFamily": 1,
-      "text": "GitHub Actions\n.github/workflows/tests.yml\n57 tests locally, 45 + 12 skipped in CI\non push + PR to main",
-      "originalText": "GitHub Actions\n.github/workflows/tests.yml\n57 tests locally, 45 + 12 skipped in CI\non push + PR to main",
+      "text": "GitHub Actions\n.github/workflows/tests.yml\n79 tests locally, 62 + 17 skipped in CI\non push + PR to main",
+      "originalText": "GitHub Actions\n.github/workflows/tests.yml\n79 tests locally, 62 + 17 skipped in CI\non push + PR to main",
       "textAlign": "center",
       "verticalAlign": "middle",
       "lineHeight": 1.25,
@@ -2916,6 +2928,490 @@
       "startArrowhead": null,
       "endArrowhead": "arrow",
       "elbowed": false
+    },
+    {
+      "id": "rec080",
+      "type": "rectangle",
+      "x": 1520,
+      "y": 560,
+      "width": 300,
+      "height": 126,
+      "angle": 0,
+      "strokeColor": "#495057",
+      "backgroundColor": "#f1f3f5",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": {
+        "type": 3
+      },
+      "seed": 777137,
+      "version": 1,
+      "versionNonce": 777274,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "tex081",
+          "type": "text"
+        },
+        {
+          "id": "arr084",
+          "type": "arrow"
+        }
+      ],
+      "updated": 1,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "rec082",
+      "type": "rectangle",
+      "x": 1520,
+      "y": 790,
+      "width": 300,
+      "height": 126,
+      "angle": 0,
+      "strokeColor": "#495057",
+      "backgroundColor": "#f1f3f5",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": {
+        "type": 3
+      },
+      "seed": 777411,
+      "version": 1,
+      "versionNonce": 777548,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "tex083",
+          "type": "text"
+        },
+        {
+          "id": "arr084",
+          "type": "arrow"
+        },
+        {
+          "id": "arr085",
+          "type": "arrow"
+        },
+        {
+          "id": "arr086",
+          "type": "arrow"
+        },
+        {
+          "id": "arr087",
+          "type": "arrow"
+        }
+      ],
+      "updated": 1,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "tex081",
+      "type": "text",
+      "x": 1528,
+      "y": 568,
+      "width": 284,
+      "height": 52.5,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "seed": 777685,
+      "version": 1,
+      "versionNonce": 777822,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1,
+      "link": null,
+      "locked": false,
+      "fontSize": 14,
+      "fontFamily": 1,
+      "text": "Grafana\nprovisioned datasource + dashboard\ngrafana/  (JSON in git, not in its DB)",
+      "originalText": "Grafana\nprovisioned datasource + dashboard\ngrafana/  (JSON in git, not in its DB)",
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "lineHeight": 1.25,
+      "containerId": "rec080",
+      "autoResize": true
+    },
+    {
+      "id": "tex083",
+      "type": "text",
+      "x": 1528,
+      "y": 798,
+      "width": 284,
+      "height": 52.5,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "seed": 777959,
+      "version": 1,
+      "versionNonce": 778096,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1,
+      "link": null,
+      "locked": false,
+      "fontSize": 14,
+      "fontFamily": 1,
+      "text": "Prometheus\nscrapes /metrics every 15s\nprometheus/prometheus.yml",
+      "originalText": "Prometheus\nscrapes /metrics every 15s\nprometheus/prometheus.yml",
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "lineHeight": 1.25,
+      "containerId": "rec082",
+      "autoResize": true
+    },
+    {
+      "id": "arr084",
+      "type": "arrow",
+      "x": 1670,
+      "y": 692,
+      "width": 0,
+      "height": 92,
+      "angle": 0,
+      "strokeColor": "#868e96",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": {
+        "type": 2
+      },
+      "seed": 778233,
+      "version": 1,
+      "versionNonce": 778370,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          92
+        ]
+      ],
+      "startBinding": {
+        "elementId": "rec080",
+        "focus": 0,
+        "gap": 6
+      },
+      "endBinding": {
+        "elementId": "rec082",
+        "focus": 0,
+        "gap": 6
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "arr085",
+      "type": "arrow",
+      "x": 1514,
+      "y": 853,
+      "width": 218,
+      "height": 0,
+      "angle": 0,
+      "strokeColor": "#868e96",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": {
+        "type": 2
+      },
+      "seed": 778507,
+      "version": 1,
+      "versionNonce": 778644,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -218,
+          0
+        ]
+      ],
+      "startBinding": {
+        "elementId": "rec082",
+        "focus": 0,
+        "gap": 6
+      },
+      "endBinding": {
+        "elementId": "rec025",
+        "focus": 0,
+        "gap": 6
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "arr086",
+      "type": "arrow",
+      "x": 1514,
+      "y": 886,
+      "width": 218,
+      "height": 120,
+      "angle": 0,
+      "strokeColor": "#868e96",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": {
+        "type": 2
+      },
+      "seed": 778781,
+      "version": 1,
+      "versionNonce": 778918,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -218,
+          120
+        ]
+      ],
+      "startBinding": {
+        "elementId": "rec082",
+        "focus": 0,
+        "gap": 6
+      },
+      "endBinding": {
+        "elementId": "rec027",
+        "focus": 0,
+        "gap": 6
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "arr087",
+      "type": "arrow",
+      "x": 1670,
+      "y": 922,
+      "width": 900,
+      "height": 308,
+      "angle": 0,
+      "strokeColor": "#868e96",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": {
+        "type": 2
+      },
+      "seed": 779055,
+      "version": 1,
+      "versionNonce": 779192,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          308
+        ],
+        [
+          -900,
+          308
+        ],
+        [
+          -900,
+          230
+        ]
+      ],
+      "startBinding": {
+        "elementId": "rec082",
+        "focus": 0,
+        "gap": 6
+      },
+      "endBinding": {
+        "elementId": "rec029",
+        "focus": 0,
+        "gap": 6
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "tex088",
+      "type": "text",
+      "x": 1520,
+      "y": 520,
+      "width": 110.00000000000001,
+      "height": 25.0,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "seed": 779329,
+      "version": 1,
+      "versionNonce": 779466,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 1,
+      "text": "MONITORING",
+      "originalText": "MONITORING",
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "containerId": null,
+      "autoResize": true
+    },
+    {
+      "id": "tex089",
+      "type": "text",
+      "x": 1330,
+      "y": 960,
+      "width": 151.8,
+      "height": 30.0,
+      "angle": 0,
+      "strokeColor": "#868e96",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "seed": 779603,
+      "version": 1,
+      "versionNonce": 779740,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1,
+      "link": null,
+      "locked": false,
+      "fontSize": 12,
+      "fontFamily": 1,
+      "text": "scrape over the compose\nnetwork; no host ports",
+      "originalText": "scrape over the compose\nnetwork; no host ports",
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "containerId": null,
+      "autoResize": true
+    },
+    {
+      "id": "tex090",
+      "type": "text",
+      "x": 590,
+      "y": 1245,
+      "width": 369.6,
+      "height": 30.0,
+      "angle": 0,
+      "strokeColor": "#868e96",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "seed": 779877,
+      "version": 1,
+      "versionNonce": 780014,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1,
+      "link": null,
+      "locked": false,
+      "fontSize": 12,
+      "fontFamily": 1,
+      "text": "/grafana/ and /prometheus/ are proxied by the same nginx\n(Grafana keeps the prefix, Prometheus has basic auth)",
+      "originalText": "/grafana/ and /prometheus/ are proxied by the same nginx\n(Grafana keeps the prefix, Prometheus has basic auth)",
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "containerId": null,
+      "autoResize": true
     }
   ],
   "appState": {
