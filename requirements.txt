@@ -45,6 +45,10 @@ python-multipart==0.0.9
 
 # Dev / tests
 pytest==8.2.0
+# fastapi's TestClient transport, used by tests/test_text_api.py. Test-only —
+# the running services never import it. Pinned because requirements-ci.txt
+# installs it and check_ci_pins.py requires every CI pin to exist here.
+httpx==0.28.1
 
 # Observability (Prometheus exposition for the three FastAPI services).
 # ZERO transitive dependencies, which is why it was chosen over

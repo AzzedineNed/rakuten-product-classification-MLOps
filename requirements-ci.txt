@@ -8,17 +8,27 @@
 #
 # Omitted on purpose (installed by requirements.txt, never touched by tests):
 #   mlflow, dagshub, dvc, dvc-http     -> tracking & data versioning
-#   fastapi, uvicorn, python-multipart -> the API layer; no test imports api/
+#
+# THE API LAYER IS NOW INSTALLED HERE, and this is a reversal — it used to be
+# omitted with the note "no test imports api/". That was true and it was the
+# problem: api/image_main.py, api/text_main.py and api/gateway_main.py were the
+# only untested code in the project, and they are the part that serves traffic.
+# tests/test_text_api.py imports api.text_main; without fastapi it would SKIP in
+# BOTH CI jobs and disappear from CI without a sound, which is the exact failure
+# this file was written to prevent. httpx is here for fastapi's TestClient.
 #
 # prometheus-client IS installed here, unlike the rest of the serving stack.
 # tests/test_observability.py drives the metrics middleware at the ASGI level
-# precisely so it needs no fastapi: a test that imported api/ would SKIP in
-# BOTH CI jobs and disappear from CI without a sound. One 80 KB dependency buys
-# real CI coverage of the instrumentation instead.
+# and is deliberately fastapi-free even now, so the instrumentation keeps its
+# own coverage independent of whether the API layer is installed.
 #   torch, torchvision                 -> not in requirements.txt at all
 #
 # MEASURED: full requirements.txt = 128s / 192 packages / 995 MB.
-#           this subset            =  65s /  ~30 packages / 467 MB.
+#           this subset before the API layer =  ~30 packages / 471 MB.
+#           this subset now                  =   64 packages / 532 MB.
+#           The jump is fastapi 0.111.0 pulling fastapi-cli -> typer/rich/
+#           uvicorn. It cannot be trimmed without changing what production
+#           installs. Read install TIME off the Actions run, not a laptop.
 #
 # EVERY PIN HERE MUST MATCH requirements.txt EXACTLY.
 # scripts/check_ci_pins.py enforces that and CI runs it before installing.
@@ -48,6 +58,13 @@ python-dotenv==1.0.1
 
 # Observability — see the note above; needed by tests/test_observability.py.
 prometheus-client==0.26.0
+
+# The API layer — needed because tests/test_text_api.py imports
+# api.text_main. httpx is fastapi's TestClient transport; it is a test-only
+# dependency and is pinned in requirements.txt alongside pytest.
+fastapi==0.111.0
+python-multipart==0.0.9
+httpx==0.28.1
 
 # Dev / tests
 pytest==8.2.0
