@@ -65,13 +65,25 @@ services:
       - "8001"
     command: ["uvicorn", "api.text_main:app", "--host", "0.0.0.0", "--port", "8001"]
     volumes:
-      # READ-ONLY, and it stays read-only now that this service is
-      # registry-aware: MLflow downloads a registered version to a temp dir
+      # WRITABLE as of the commit that gave this service a /train endpoint.
+      #
+      # It was read-only before, and the reasoning behind that is still sound
+      # FOR SERVING: MLflow downloads a registered version to a temp dir
       # (mlflow.utils.file_utils.create_tmp_dir falls through to
       # tempfile.mkdtemp(), i.e. /tmp in this container — verified in the
-      # installed mlflow 3.14.0 source), never into models/. This mount is only
-      # the LOCAL FALLBACK used when the registry is unreachable.
-      - ./models:/app/models:ro
+      # installed mlflow 3.14.0 source), never into models/, so a serving-only
+      # container genuinely never needs to write here. Training does:
+      # scripts/train_text.py writes models/text/{tfidf_vectorizer,
+      # logistic_regression}.pkl and split.json. The requirement changed, so
+      # the mount changed with it rather than the comment quietly disagreeing
+      # with the line under it.
+      - ./models:/app/models
+      # READ-ONLY: training reads data/raw/X_train*.csv via config.RAW_DIR and
+      # must never modify the dataset. Not mounted at all before this commit.
+      - ./data:/app/data:ro
+      # Writable: metrics_text_train.json, the classification report and the
+      # confusion matrix land in reports/text/.
+      - ./reports:/app/reports
     # Registry-aware serving needs the DagsHub MLflow credentials at RUNTIME.
     # Without this the container has no MLFLOW_TRACKING_URI, so it would fall
     # back to the local .pkl files forever while looking like it resolves an
@@ -90,10 +102,15 @@ services:
       - .env
     restart: unless-stopped
 
-    # PROVISIONAL — NOT MEASURED. The artifacts are tiny (0.5 MB vectorizer +
-    # 2.2 MB estimator) but scikit-learn and scipy are not. Confirm with
-    # `docker stats` and tighten.
-    mem_limit: 1g
+    # TEMPORARILY RAISED FOR MEASUREMENT — 1g while this service only served.
+    # Serving was measured at 181 MiB; training in-container has NEVER been
+    # measured, and a peak cannot be measured under a cap low enough to kill the
+    # process producing it. So this is deliberately generous for ONE run, then
+    # tightened to the measured peak plus headroom, the way the image service's
+    # 2.5g was arrived at (idle 47 MiB / serving 442 MiB / retrain peak 1.48 GiB).
+    # DO NOT leave this at 2.5g: with the image service also at 2.5g, two
+    # concurrent retrains would not fit in 4.807 GiB.
+    mem_limit: 2.5g
 
     healthcheck:
       test: ["CMD", "python", "-c",
