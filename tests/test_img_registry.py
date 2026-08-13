@@ -59,50 +59,8 @@ def _payload(marker: str) -> dict:
     return dict(PAYLOAD_TEMPLATE, classifier={"src": marker})
 
 
-@pytest.fixture(autouse=True)
-def _isolate_mlflow_global_state():
-    """Undo the process-global state MLflow leaves behind, so these tests cannot
-    make the rest of the suite order-dependent.
-
-    THREE pieces leak, all MEASURED here rather than assumed:
-
-      1. mlflow.set_tracking_uri() does not only set a module global — it also
-         WRITES MLFLOW_TRACKING_URI INTO os.environ. So it beats the environment
-         variable permanently, and monkeypatch.setenv/.delenv on that variable
-         is inert in any later test in the same process.
-      2. mlflow.set_experiment() likewise exports MLFLOW_EXPERIMENT_ID. Carried
-         into a test pointing at a different database, a later bare start_run()
-         dies with "No Experiment with id=N exists".
-      3. Both are cached in private module globals as well as the environment,
-         and the two must agree.
-
-    Restoring by CALLING the setters does not work: with nothing previously set,
-    get_tracking_uri() returns a COMPUTED default (sqlite:///<cwd>/mlflow.db),
-    and feeding that back turns an unset variable into a set one pointing at the
-    repo root. So the snapshot is of the raw state, restored by assignment.
-    Verified both ways round: this file leaves no MLFLOW_* variable behind, and
-    tests/test_registry.py passes whether it runs before or after this one.
-    """
-    try:
-        import mlflow  # noqa: F401
-        from mlflow.tracking import fluent
-        from mlflow.tracking._tracking_service import utils
-    except ImportError:  # CI subset — nothing global to restore
-        yield
-        return
-
-    env = {k: os.environ.get(k) for k in
-           ("MLFLOW_TRACKING_URI", "MLFLOW_EXPERIMENT_ID", "MLFLOW_EXPERIMENT_NAME")}
-    uri, experiment = utils._tracking_uri, fluent._active_experiment_id
-    yield
-    utils._tracking_uri, fluent._active_experiment_id = uri, experiment
-    for key, value in env.items():
-        if value is None:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = value
-
-
+# The MLflow global-state isolation this file needs lives in tests/conftest.py,
+# where it protects every test file rather than only this one.
 @pytest.fixture
 def serving(monkeypatch, tmp_path):
     """A clean scripts/predict.py pointed at a throwaway local model.
@@ -605,3 +563,49 @@ def test_a_missing_artifact_is_skipped_not_raised(tmp_path, monkeypatch):
     assert mlflow.get_run(run_id).data.metrics["f1"] == pytest.approx(0.5)
     from mlflow import MlflowClient
     assert MlflowClient().list_artifacts(run_id, "plots") == []
+
+
+# --------------------------------------------------------------------------
+# the serving retry cap
+# --------------------------------------------------------------------------
+def test_serving_http_limits_are_small_enough_to_stay_responsive():
+    """A dead registry must not make the first /predict appear to hang.
+
+    MEASURED on the text side against an unreachable tracking URI: MLflow's
+    shipped defaults (7 retries, 120s timeout) blocked for OVER 170 SECONDS —
+    and resolving an alias costs two requests, so the real figure is worse. The
+    image side reaches the registry lazily, on the first prediction rather than
+    at startup, so the same outage shows up as a request that never returns
+    instead of a container that never boots. Same fix, same numbers.
+    """
+    assert int(tracking._SERVING_HTTP_LIMITS["MLFLOW_HTTP_REQUEST_MAX_RETRIES"]) <= 3
+    assert int(tracking._SERVING_HTTP_LIMITS["MLFLOW_HTTP_REQUEST_TIMEOUT"]) <= 30
+
+
+@pytest.mark.slow
+def test_serving_http_limits_are_applied(tmp_path, monkeypatch):
+    """Applied at CALL time, not import time: MLflow reads these on every
+    request, so the bound holds even in a process that imported mlflow earlier."""
+    pytest.importorskip("mlflow", reason="mlflow not installed (CI subset)")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path}/mlflow.db")
+    monkeypatch.delenv("MLFLOW_HTTP_REQUEST_MAX_RETRIES", raising=False)
+    monkeypatch.setattr(config, "REGISTERED_MODEL_NAME", "never-registered")
+
+    with pytest.raises(Exception):
+        tracking.load_from_registry()
+    assert os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] == \
+        tracking._SERVING_HTTP_LIMITS["MLFLOW_HTTP_REQUEST_MAX_RETRIES"]
+
+
+@pytest.mark.slow
+def test_operator_can_raise_the_serving_http_limits(tmp_path, monkeypatch):
+    """setdefault, not assignment: an operator who wants MLflow's patient retry
+    behaviour back must be able to have it."""
+    pytest.importorskip("mlflow", reason="mlflow not installed (CI subset)")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path}/mlflow.db")
+    monkeypatch.setenv("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "9")
+    monkeypatch.setattr(config, "REGISTERED_MODEL_NAME", "never-registered")
+
+    with pytest.raises(Exception):
+        tracking.load_from_registry()
+    assert os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] == "9"

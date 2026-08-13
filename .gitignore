@@ -35,3 +35,8 @@ airflow/config/
 nginx/.htpasswd
 /models
 mlruns/
+
+# MLflow test debris. mlruns/ above covers the artifact store; this is the
+# tracking store, which MLflow 3.14.0 creates in the CWD when no tracking URI
+# is set at all (its default is sqlite:///<cwd>/mlflow.db, not ./mlruns).
+mlflow.db

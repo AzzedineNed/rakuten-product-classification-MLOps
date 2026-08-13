@@ -59,6 +59,24 @@ def enabled() -> bool:
     return bool(os.getenv("MLFLOW_TRACKING_URI"))
 
 
+# How long a SERVING process may block on an unreachable registry before giving
+# up and using the local artifact. MLflow's shipped defaults are tuned for batch
+# jobs riding out rate limits: 7 retries with an exponential backoff and a 120s
+# per-request timeout, which its own source comments as "~4 minutes" — and
+# resolving an alias costs TWO requests when the alias lookup fails, so a dead
+# tracking server can block for the better part of ten minutes. On the image
+# side that lands on the FIRST /predict rather than at startup (the payload
+# resolves lazily), so the cost is a request that appears to hang instead of a
+# boot that appears to hang — the same outage, worn differently. These are
+# setdefault, not assignment: an operator can still raise them.
+#
+# Copied deliberately from rakuten_text.tracking, which measured the numbers.
+_SERVING_HTTP_LIMITS = {
+    "MLFLOW_HTTP_REQUEST_MAX_RETRIES": "2",
+    "MLFLOW_HTTP_REQUEST_TIMEOUT": "10",
+}
+
+
 def _set_experiment(mlflow) -> None:
     mlflow.set_experiment(config.EXPERIMENT_NAME)
 
@@ -163,6 +181,12 @@ def load_from_registry(alias: Optional[str] = None) -> dict:
     """
     if not enabled():
         raise RuntimeError("MLFLOW_TRACKING_URI not set — registry unavailable.")
+
+    # Must happen BEFORE the mlflow import / first request; see
+    # _SERVING_HTTP_LIMITS. MLflow reads these per request, so setting them here
+    # binds even in a process that imported mlflow earlier.
+    for key, value in _SERVING_HTTP_LIMITS.items():
+        os.environ.setdefault(key, value)
 
     import joblib
     import mlflow

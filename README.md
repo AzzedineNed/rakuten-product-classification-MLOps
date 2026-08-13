@@ -320,6 +320,12 @@ during a DagsHub outage instead of degrading to the local model. With the cap th
 same startup took 10.7s. Raise `MLFLOW_HTTP_REQUEST_MAX_RETRIES` /
 `MLFLOW_HTTP_REQUEST_TIMEOUT` to override.
 
+Both modalities cap it, but they pay it at different moments. The text service
+resolves the registry when it loads its model, so an outage delays **startup**.
+The image service resolves lazily on the first `/predict`, so the same outage
+delays **one request** instead — once, because the failure latches and every
+later request goes straight to the local artifact.
+
 ---
 
 ## Docker
