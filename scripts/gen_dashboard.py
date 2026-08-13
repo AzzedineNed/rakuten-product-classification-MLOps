@@ -179,8 +179,12 @@ def build() -> dict:
               "first real /predict — the service resolves its model lazily.",
               (6, 1, 18, 4),
               "rakuten_model_info", "S",
+              # `modality` is dropped: it duplicates `service` on every row
+              # except the gateway's (fusion vs gateway), and the question this
+              # panel answers is per-SERVICE. What is left is service + source,
+              # which is the smallest pair that answers it.
               {"Time": True, "Value": True, "__name__": True,
-               "instance": True, "job": True}),
+               "instance": True, "job": True, "modality": True}),
 
         row(4, "Traffic and latency", 5),
         timeseries(5, "Request rate",

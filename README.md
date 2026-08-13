@@ -408,7 +408,10 @@ forgotten password can only be replaced, never recovered.
 | `rakuten_fusion_requests_total` | `service, modalities, fused, degraded` | how often one modality is silently missing |
 
 `rakuten_model_info` is the dashboard counterpart of `/health`'s `model_source`:
-it reads from the running process, not from disk. The image service reports
+it reads from the running process, not from disk. The metric keeps its
+`modality` label — grouping by it is useful — but the dashboard's serving table
+hides that column, because it duplicates `service` on every row except the
+gateway's (`fusion` vs `gateway`). The image service reports
 `not-loaded` until its first real `/predict`, which is the documented lazy-load
 wart, not a fault.
 

@@ -131,7 +131,8 @@
               "Value": true,
               "__name__": true,
               "instance": true,
-              "job": true
+              "job": true,
+              "modality": true
             }
           }
         }
