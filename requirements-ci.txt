@@ -36,6 +36,10 @@ numpy==1.26.4
 pandas==2.2.2
 pillow==10.3.0
 scikit-learn==1.4.2
+# Pinned here too, not just in requirements.txt: the CI suite fits a
+# LogisticRegression, so CI must exercise the same solver the project ships.
+# See requirements.txt for why scipy is pinned at all.
+scipy==1.17.1
 joblib==1.4.2
 tqdm==4.66.4
 matplotlib==3.8.4

@@ -20,6 +20,18 @@ numpy==1.26.4
 pandas==2.2.2
 pillow==10.3.0
 scikit-learn==1.4.2
+# scipy arrives as a scikit-learn dependency and was previously left to resolve
+# to whatever was current. It is pinned deliberately because it supplies the
+# L-BFGS-B implementation that actually fits LogisticRegression: a solver change
+# can shift fitted coefficients, and every metric this project reports with them,
+# without a single line of our own code changing. 1.17.1 is the version all the
+# recorded numbers were produced with.
+#
+# This is a REPRODUCIBILITY pin, not a breakage guard. scipy deprecates the
+# disp/iprint options that scikit-learn 1.4.2 passes to L-BFGS-B, but unknown
+# solver options only produce OptimizeWarning and the fit still succeeds
+# (measured) — removal will not turn the suite red.
+scipy==1.17.1
 joblib==1.4.2
 tqdm==4.66.4
 matplotlib==3.8.4
