@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 
 import _bootstrap  # noqa: F401
 import numpy as np
@@ -33,7 +32,7 @@ from sklearn.metrics import (
     f1_score,
 )
 
-from rakuten_img import classifier, config
+from rakuten_img import classifier, config, tracking
 
 
 def _load_test():
@@ -77,7 +76,16 @@ def evaluate() -> dict:
 
     cm_path = _plot_confusion(y_test, y_pred, present, target_names)
 
-    _log_to_mlflow(payload, metrics, cm_path)
+    # Reopen the training run recorded in the payload and attach the test
+    # metrics plus the three report artifacts. Best-effort; never raises here.
+    tracking.attach_evaluation(
+        payload.get("mlflow_run_id"), metrics,
+        artifacts=[
+            ("plots", cm_path),
+            ("reports", config.REPORTS_DIR / "classification_report.txt"),
+            ("reports", config.REPORTS_DIR / "metrics.json"),
+        ],
+    )
     print("🎉 evaluate.py done. See reports/.")
     return metrics
 
@@ -138,45 +146,6 @@ def _plot_confusion(y_true, y_pred, labels, target_names):
     plt.close(fig)
     print(f"🖼️  Saved {out}")
     return out
-
-
-def _log_to_mlflow(payload, metrics, cm_path):
-    """Best-effort MLflow logging. Attaches test metrics + confusion matrix +
-    classification report to the training run recorded in the model payload;
-    falls back to a standalone evaluation run if no run_id is stored. The model
-    artifact itself is logged and registered by train.py. Never raises into the
-    evaluation path."""
-    if not os.getenv("MLFLOW_TRACKING_URI"):
-        print("ℹ️  MLFLOW_TRACKING_URI not set — skipping experiment logging.")
-        return
-    try:
-        import mlflow
-
-        run_id = payload.get("mlflow_run_id")
-        mlflow.set_experiment(os.getenv("MLFLOW_EXPERIMENT_NAME", "rakuten-image"))
-        linked = bool(run_id)
-        ctx = mlflow.start_run(run_id=run_id) if linked else mlflow.start_run()
-        with ctx:
-            mlflow.set_tag("modality", "image")
-            if not linked:
-                mlflow.set_tag("stage", "evaluate-standalone")
-            # Log only numeric metrics (skip the string entries backbone/classifier_type).
-            numeric = {k: float(v) for k, v in metrics.items()
-                       if isinstance(v, (int, float)) and not isinstance(v, bool)}
-            mlflow.log_metrics(numeric)
-            mlflow.log_artifact(str(cm_path), artifact_path="plots")
-            report_p = config.REPORTS_DIR / "classification_report.txt"
-            if report_p.exists():
-                mlflow.log_artifact(str(report_p), artifact_path="reports")
-            metrics_p = config.REPORTS_DIR / "metrics.json"
-            if metrics_p.exists():
-                mlflow.log_artifact(str(metrics_p), artifact_path="reports")
-        if linked:
-            print(f"📝 Attached test metrics + confusion matrix to training run ({run_id[:8]}…).")
-        else:
-            print("📝 Logged a standalone evaluation run (no training run_id found).")
-    except Exception as exc:  # noqa: BLE001
-        print(f"⚠️  MLflow logging skipped ({type(exc).__name__}: {exc}).")
 
 
 def main() -> None:

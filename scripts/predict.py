@@ -38,7 +38,7 @@ import _bootstrap  # noqa: F401
 import numpy as np
 from PIL import Image
 
-from rakuten_img import backbone, classifier, config, images
+from rakuten_img import backbone, classifier, config, images, tracking
 
 # Registry cache: resolved once per process. _REGISTRY_FAILED avoids re-hitting
 # a dead server on every request once the fallback has kicked in.
@@ -75,7 +75,7 @@ def _load_payload():
         return _REGISTRY_PAYLOAD
     if not _REGISTRY_FAILED and os.getenv("MLFLOW_TRACKING_URI"):
         try:
-            _REGISTRY_PAYLOAD = classifier.load_from_registry()
+            _REGISTRY_PAYLOAD = tracking.load_from_registry()
             _SERVING_SOURCE = _REGISTRY_PAYLOAD.get("serving_source", "registry")
             return _REGISTRY_PAYLOAD
         except Exception as exc:  # noqa: BLE001

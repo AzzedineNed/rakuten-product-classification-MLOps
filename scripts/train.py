@@ -31,7 +31,7 @@ import _bootstrap  # noqa: F401
 import numpy as np
 from sklearn.metrics import f1_score
 
-from rakuten_img import classifier, config
+from rakuten_img import classifier, config, tracking
 
 
 def _load(split: str):
@@ -41,12 +41,6 @@ def _load(split: str):
             f"Missing cached features for '{split}' ({x_path}). Run process.py first."
         )
     return np.load(x_path), np.load(y_path)
-
-
-def _mlflow_enabled() -> bool:
-    """Gate on the tracking URI so a machine with no MLflow setup (a teammate who
-    just cloned, CI, offline work) trains normally without tracking side effects."""
-    return bool(os.getenv("MLFLOW_TRACKING_URI"))
 
 
 def train() -> dict:
@@ -82,7 +76,7 @@ def train() -> dict:
     # id so it can be persisted with the model. evaluate.py reopens this run to
     # add the test metrics + confusion matrix. If tracking is off/unreachable,
     # run_id stays None and the model is still saved normally.
-    run_id = _log_to_mlflow(metrics)
+    run_id = tracking.log_training_run(config.run_params(), metrics)
     classifier.save(clf, extra=metrics, run_id=run_id)
 
     # Publish the saved model: attach the file to the training run and register
@@ -91,7 +85,7 @@ def train() -> dict:
     # The tags are descriptive only — they say what this version IS, so a human
     # can compare candidates. They do NOT promote it: serving follows the
     # PRODUCTION_ALIAS, which only scripts/promote.py moves.
-    classifier.register_in_mlflow(run_id, tags={
+    tracking.register_model(run_id, tags={
         "val_f1_weighted": round(metrics.get("val_f1_weighted", float("nan")), 4),
         "classifier_type": config.CLASSIFIER_TYPE,
         "train_samples": metrics.get("train_samples", "unknown"),
@@ -103,32 +97,6 @@ def train() -> dict:
 
     print(f"🎉 train.py done in {metrics['elapsed_sec']}s")
     return metrics
-
-
-def _log_to_mlflow(metrics: dict):
-    """Best-effort logging. Returns the MLflow run_id (str) or None. Never raises."""
-    if not _mlflow_enabled():
-        print("ℹ️  MLFLOW_TRACKING_URI not set — skipping experiment logging.")
-        return None
-    try:
-        import mlflow
-
-        # Experiment namespaced by modality so text/fusion runs can share the same
-        # tracking server later without colliding with image runs.
-        mlflow.set_experiment(os.getenv("MLFLOW_EXPERIMENT_NAME", "rakuten-image"))
-        with mlflow.start_run() as run:
-            mlflow.set_tag("modality", "image")
-            mlflow.set_tag("stage", "train")
-            mlflow.log_params(config.run_params())
-            mlflow.log_metrics({k: float(v) for k, v in metrics.items()})
-            run_id = run.info.run_id
-        print(f"📝 Logged training run to MLflow (run_id={run_id[:8]}…).")
-        return run_id
-    except Exception as exc:  # noqa: BLE001
-        # A tracking outage, bad creds, or missing mlflow must not lose a model
-        # that will still be saved to disk. Warn and carry on.
-        print(f"⚠️  MLflow logging skipped ({type(exc).__name__}: {exc}).")
-        return None
 
 
 def main() -> None:

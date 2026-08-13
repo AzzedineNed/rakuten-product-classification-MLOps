@@ -117,7 +117,8 @@ rakuten-image-mlops/
 ├── src/rakuten_img/           # image modality
 │   ├── config.py  images.py  data.py
 │   ├── backbone.py            # frozen MobileNetV2 (the only module importing torch)
-│   ├── classifier.py          # build/save/load head, registry publish/pull, reorder
+│   ├── classifier.py          # build/save/load head, reorder to canonical order
+│   ├── tracking.py            # all MLflow code for this modality
 │   └── ens_download.py
 ├── src/rakuten_text/          # text modality (library only, no entrypoints)
 │   ├── config.py  preprocessing.py  predict.py

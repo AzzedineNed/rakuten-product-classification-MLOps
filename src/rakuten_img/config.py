@@ -126,6 +126,12 @@ MLP_HIDDEN = (256,)
 # --------------------------------------------------------------------------- #
 # MLflow Model Registry
 # --------------------------------------------------------------------------- #
+# Experiment holding the image runs, namespaced by modality so image, text and
+# (later) fusion runs share one tracking server without colliding. Read from the
+# same env var the two entrypoints used inline before rakuten_img.tracking
+# existed, so nothing an operator has already set changes meaning.
+EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME", "rakuten-image")
+
 # Name under which train.py registers each new model version, and from which
 # predict.py/the API serve (with a local-.joblib fallback). One registered
 # model per modality; the text service will use its own name.

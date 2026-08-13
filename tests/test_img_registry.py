@@ -4,8 +4,8 @@ happens when the registry is not there, and what publishing a version does.
 WHY THIS FILE EXISTS. The image modality's registry code had NO direct test
 coverage. tests/test_registry.py covers rakuten_common.registry
 .resolve_registry_version and nothing else; tests/test_pipeline.py covers
-build/save/load/reorder. Nothing exercised classifier.register_in_mlflow,
-classifier.load_from_registry, or the registry-first/local-fallback policy in
+build/save/load/reorder. Nothing exercised the registry publish/pull pair now
+in rakuten_img.tracking, or the registry-first/local-fallback policy in
 scripts/predict.py — which is the code that decides whether the image service
 serves or 503s, and the code with the most exposure to a DagsHub outage.
 
@@ -26,13 +26,14 @@ the two modalities have separate loaders.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 
 import joblib
 import pytest
 
-from rakuten_img import classifier, config
+from rakuten_img import classifier, config, tracking
 
 # scripts/ is not a package and conftest.py only puts src/ on the path.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
@@ -56,6 +57,50 @@ def _payload(marker: str) -> dict:
     predict_proba, so a dict with an identifiable marker is enough and keeps
     sklearn out of these tests."""
     return dict(PAYLOAD_TEMPLATE, classifier={"src": marker})
+
+
+@pytest.fixture(autouse=True)
+def _isolate_mlflow_global_state():
+    """Undo the process-global state MLflow leaves behind, so these tests cannot
+    make the rest of the suite order-dependent.
+
+    THREE pieces leak, all MEASURED here rather than assumed:
+
+      1. mlflow.set_tracking_uri() does not only set a module global — it also
+         WRITES MLFLOW_TRACKING_URI INTO os.environ. So it beats the environment
+         variable permanently, and monkeypatch.setenv/.delenv on that variable
+         is inert in any later test in the same process.
+      2. mlflow.set_experiment() likewise exports MLFLOW_EXPERIMENT_ID. Carried
+         into a test pointing at a different database, a later bare start_run()
+         dies with "No Experiment with id=N exists".
+      3. Both are cached in private module globals as well as the environment,
+         and the two must agree.
+
+    Restoring by CALLING the setters does not work: with nothing previously set,
+    get_tracking_uri() returns a COMPUTED default (sqlite:///<cwd>/mlflow.db),
+    and feeding that back turns an unset variable into a set one pointing at the
+    repo root. So the snapshot is of the raw state, restored by assignment.
+    Verified both ways round: this file leaves no MLFLOW_* variable behind, and
+    tests/test_registry.py passes whether it runs before or after this one.
+    """
+    try:
+        import mlflow  # noqa: F401
+        from mlflow.tracking import fluent
+        from mlflow.tracking._tracking_service import utils
+    except ImportError:  # CI subset — nothing global to restore
+        yield
+        return
+
+    env = {k: os.environ.get(k) for k in
+           ("MLFLOW_TRACKING_URI", "MLFLOW_EXPERIMENT_ID", "MLFLOW_EXPERIMENT_NAME")}
+    uri, experiment = utils._tracking_uri, fluent._active_experiment_id
+    yield
+    utils._tracking_uri, fluent._active_experiment_id = uri, experiment
+    for key, value in env.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
 
 
 @pytest.fixture
@@ -108,7 +153,7 @@ def test_registry_success_is_served_and_local_disk_is_not_read(serving, monkeypa
     local .joblib absent entirely."""
     served = _payload("registry")
     served["serving_source"] = "registry:rakuten-image-classifier@production/v2"
-    monkeypatch.setattr(classifier, "load_from_registry",
+    monkeypatch.setattr(tracking, "load_from_registry",
                         lambda alias=None: served)
 
     assert not config.CLASSIFIER_PATH.exists()
@@ -122,7 +167,7 @@ def test_registry_failure_falls_back_to_local_and_says_so(serving, monkeypatch, 
     def _explode(alias=None):
         raise RuntimeError("connection refused")
 
-    monkeypatch.setattr(classifier, "load_from_registry", _explode)
+    monkeypatch.setattr(tracking, "load_from_registry", _explode)
     local = _write_local()
 
     payload = serving._load_payload()
@@ -140,7 +185,7 @@ def test_a_dead_registry_is_consulted_once_not_once_per_request(serving, monkeyp
         calls.append(alias)
         raise RuntimeError("connection refused")
 
-    monkeypatch.setattr(classifier, "load_from_registry", _explode)
+    monkeypatch.setattr(tracking, "load_from_registry", _explode)
     _write_local()
 
     for _ in range(3):
@@ -157,7 +202,7 @@ def test_a_successful_registry_load_is_cached_for_the_process(serving, monkeypat
         calls.append(alias)
         return served
 
-    monkeypatch.setattr(classifier, "load_from_registry", _count)
+    monkeypatch.setattr(tracking, "load_from_registry", _count)
     for _ in range(3):
         assert serving._load_payload() is served
     assert len(calls) == 1
@@ -178,7 +223,7 @@ def test_registry_is_not_consulted_without_a_tracking_uri(serving, monkeypatch):
         raise RuntimeError("registry must not be consulted")
 
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
-    monkeypatch.setattr(classifier, "load_from_registry", _record)
+    monkeypatch.setattr(tracking, "load_from_registry", _record)
     _write_local()
 
     serving._load_payload()
@@ -211,22 +256,22 @@ def test_load_from_registry_raises_without_a_tracking_uri(monkeypatch):
     holds in the CI subset too."""
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     with pytest.raises(RuntimeError, match="MLFLOW_TRACKING_URI"):
-        classifier.load_from_registry()
+        tracking.load_from_registry()
 
 
-def test_register_in_mlflow_is_a_no_op_without_a_tracking_uri(monkeypatch):
+def test_register_model_is_a_no_op_without_a_tracking_uri(monkeypatch):
     """The opposite policy to load_from_registry, on purpose: registration is
     best-effort and must never raise into a training run that has already
     saved a model to disk."""
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
-    assert classifier.register_in_mlflow("some-run-id") is None
+    assert tracking.register_model("some-run-id") is None
 
 
-def test_register_in_mlflow_is_a_no_op_without_a_run_id(monkeypatch, tmp_path, capsys):
+def test_register_model_is_a_no_op_without_a_run_id(monkeypatch, tmp_path, capsys):
     """Training with tracking on but logging failed: there is no run to attach
     the artifact to, so registration is skipped and said out loud."""
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path}/mlflow.db")
-    assert classifier.register_in_mlflow(None) is None
+    assert tracking.register_model(None) is None
     assert "skipping model registration" in capsys.readouterr().out
 
 
@@ -249,7 +294,7 @@ def test_default_model_path_is_bound_at_import_not_call_time(tmp_path, monkeypat
 # --------------------------------------------------------------------------
 def _real_registry(tmp_path, monkeypatch, markers, alias_on=None, tags=None):
     """Stand up a real SQLite registry and publish one version per entry in
-    `markers` THROUGH classifier.register_in_mlflow — the function under test,
+    `markers` THROUGH tracking.register_model — the function under test,
     so the write side is exercised rather than simulated.
 
     artifact_location is forced inside tmp_path: the default would create
@@ -272,7 +317,7 @@ def _real_registry(tmp_path, monkeypatch, markers, alias_on=None, tags=None):
         model_file = tmp_path / f"stage-{marker}.joblib"
         joblib.dump(_payload(marker), model_file)
         with mlflow.start_run(experiment_id=experiment_id) as run:
-            version = classifier.register_in_mlflow(
+            version = tracking.register_model(
                 run.info.run_id, path=model_file, tags=tags)
         created.append(version)
 
@@ -288,7 +333,7 @@ def test_real_registry_round_trip_through_a_single_file_source(tmp_path, monkeyp
     """Register, then pull back: the image version's source is one joblib FILE,
     which is the whole reason the image loader is not the text loader."""
     name, created = _real_registry(tmp_path, monkeypatch, markers=["a"])
-    payload = classifier.load_from_registry()
+    payload = tracking.load_from_registry()
 
     assert payload["classifier"] == {"src": "a"}
     assert payload["serving_source"] == f"registry:{name}/v{created[0]} (unpromoted)"
@@ -297,7 +342,7 @@ def test_real_registry_round_trip_through_a_single_file_source(tmp_path, monkeyp
 @pytest.mark.slow
 def test_registered_version_is_returned_as_a_string(tmp_path, monkeypatch):
     """MLflow 3.14.0 returns ModelVersion.version as an INT against a local
-    backend and a STRING through DagsHub's REST layer. register_in_mlflow
+    backend and a STRING through DagsHub's REST layer. register_model
     normalises with str() so callers never have to care."""
     _, created = _real_registry(tmp_path, monkeypatch, markers=["a"])
     assert created == ["1"]
@@ -310,7 +355,7 @@ def test_real_registry_alias_beats_the_newest_version(tmp_path, monkeypatch):
     the aliased one, not the newest."""
     name, created = _real_registry(tmp_path, monkeypatch,
                                    markers=["a", "b"], alias_on=0)
-    payload = classifier.load_from_registry()
+    payload = tracking.load_from_registry()
 
     assert payload["classifier"] == {"src": "a"}
     assert payload["serving_source"] == \
@@ -361,7 +406,7 @@ def test_a_tag_that_cannot_be_set_does_not_lose_the_version(tmp_path, monkeypatc
     model_file = tmp_path / "model.joblib"
     joblib.dump(_payload("a"), model_file)
     with mlflow.start_run(experiment_id=experiment_id) as run:
-        version = classifier.register_in_mlflow(
+        version = tracking.register_model(
             run.info.run_id, path=model_file, tags={"env": "host"})
 
     assert version == "1"
@@ -380,7 +425,7 @@ def test_a_bad_run_id_returns_none_instead_of_raising(tmp_path, monkeypatch, cap
     model_file = tmp_path / "model.joblib"
     joblib.dump(_payload("a"), model_file)
 
-    assert classifier.register_in_mlflow("no-such-run", path=model_file) is None
+    assert tracking.register_model("no-such-run", path=model_file) is None
     assert "Model registration skipped" in capsys.readouterr().out
 
 
@@ -395,7 +440,7 @@ def test_nothing_registered_yet_raises_lookuperror(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "REGISTERED_MODEL_NAME", "never-registered")
 
     with pytest.raises(LookupError):
-        classifier.load_from_registry()
+        tracking.load_from_registry()
 
 
 @pytest.mark.slow
@@ -425,3 +470,138 @@ def test_end_to_end_serving_falls_back_when_the_registry_is_empty(
 
     serving._load_payload()
     assert serving.model_source() == f"local:{config.CLASSIFIER_PATH.name}"
+
+
+# --------------------------------------------------------------------------
+# the logging half of rakuten_img.tracking
+# --------------------------------------------------------------------------
+# log_training_run and attach_evaluation were the private _log_to_mlflow
+# functions inlined in scripts/train.py and scripts/evaluate.py. Being private
+# to a script, neither was reachable by a test; both are covered here now that
+# they live in the package.
+def test_log_training_run_is_a_no_op_without_a_tracking_uri(monkeypatch, capsys):
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    assert tracking.log_training_run({"a": 1}, {"b": 2}) is None
+    assert "skipping experiment logging" in capsys.readouterr().out
+
+
+def test_attach_evaluation_is_a_no_op_without_a_tracking_uri(monkeypatch, capsys):
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    assert tracking.attach_evaluation("run", {"f1": 0.5}) is None
+    assert "skipping experiment logging" in capsys.readouterr().out
+
+
+def test_log_training_run_never_raises_on_a_broken_backend(monkeypatch, capsys):
+    """Training has not saved the model yet when this is called, so an
+    unreachable tracking server must cost a warning and a None, never the run."""
+    mlflow = pytest.importorskip("mlflow", reason="mlflow not installed (CI subset)")
+    broken = "not-a-real-scheme://nowhere"
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", broken)  # what tracking.enabled() reads
+    mlflow.set_tracking_uri(broken)  # what mlflow itself reads; see the fixture
+    assert tracking.log_training_run({"a": 1}, {"b": 2}) is None
+    assert "MLflow logging skipped" in capsys.readouterr().out
+
+
+def _tracking_server(tmp_path, monkeypatch):
+    """A real SQLite tracking server with its artifact store inside tmp_path."""
+    mlflow = pytest.importorskip("mlflow", reason="mlflow not installed (CI subset)")
+    uri = f"sqlite:///{tmp_path}/mlflow.db"
+    mlflow.set_tracking_uri(uri)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
+    monkeypatch.setattr(config, "EXPERIMENT_NAME", "image-tracking-test")
+    mlflow.create_experiment("image-tracking-test",
+                             artifact_location=str(tmp_path / "artifacts"))
+    return mlflow
+
+
+@pytest.mark.slow
+def test_log_training_run_records_params_metrics_and_tags(tmp_path, monkeypatch):
+    """The run train.py opens: tagged by modality and stage so image, text and
+    fusion runs stay tellable apart on one tracking server."""
+    mlflow = _tracking_server(tmp_path, monkeypatch)
+    run_id = tracking.log_training_run({"backbone": "mobilenet_v2"},
+                                       {"val_f1_weighted": 0.5468})
+    assert run_id
+
+    run = mlflow.get_run(run_id)
+    assert run.data.tags["modality"] == "image"
+    assert run.data.tags["stage"] == "train"
+    assert run.data.params["backbone"] == "mobilenet_v2"
+    assert run.data.metrics["val_f1_weighted"] == pytest.approx(0.5468)
+    assert mlflow.get_experiment(run.info.experiment_id).name == config.EXPERIMENT_NAME
+
+
+@pytest.mark.slow
+def test_attach_evaluation_reopens_the_training_run(tmp_path, monkeypatch):
+    """ONE RUN PER MODEL. The test metrics must land on the training run, and
+    stage must still say 'train' — overwriting it would erase how the run
+    started."""
+    mlflow = _tracking_server(tmp_path, monkeypatch)
+    run_id = tracking.log_training_run({"backbone": "mobilenet_v2"}, {"train_samples": 10})
+
+    report = tmp_path / "classification_report.txt"
+    report.write_text("report")
+    tracking.attach_evaluation(run_id, {"f1_weighted": 0.79, "backbone": "mobilenet_v2"},
+                               artifacts=[("reports", report)])
+
+    run = mlflow.get_run(run_id)
+    assert run.data.metrics["f1_weighted"] == pytest.approx(0.79)
+    assert run.data.metrics["train_samples"] == pytest.approx(10)
+    assert run.data.tags["stage"] == "train"
+
+
+@pytest.mark.slow
+def test_attach_evaluation_skips_non_numeric_metrics(tmp_path, monkeypatch):
+    """evaluate.py carries backbone and classifier_type as strings in the same
+    dict it logs. Passing those to log_metrics would raise and lose the lot."""
+    mlflow = _tracking_server(tmp_path, monkeypatch)
+    run_id = tracking.log_training_run({}, {})
+    tracking.attach_evaluation(run_id, {"accuracy": 0.5, "backbone": "mobilenet_v2"})
+    assert "backbone" not in mlflow.get_run(run_id).data.metrics
+
+
+@pytest.mark.slow
+def test_attach_evaluation_without_a_run_id_logs_a_standalone_run(tmp_path, monkeypatch):
+    """An evaluation of a model trained before tracking was configured must
+    still be recorded, and must be identifiable as unlinked."""
+    mlflow = _tracking_server(tmp_path, monkeypatch)
+    tracking.attach_evaluation(None, {"f1_weighted": 0.5})
+
+    runs = mlflow.search_runs(experiment_names=[config.EXPERIMENT_NAME],
+                              output_format="list")
+    assert len(runs) == 1
+    assert runs[0].data.tags["stage"] == "evaluate-standalone"
+
+
+@pytest.mark.slow
+def test_two_artifacts_can_share_one_artifact_path(tmp_path, monkeypatch):
+    """Why the signature takes PAIRS and not a dict: evaluate.py logs both the
+    classification report and metrics.json under 'reports'."""
+    mlflow = _tracking_server(tmp_path, monkeypatch)
+    run_id = tracking.log_training_run({}, {})
+    a, b = tmp_path / "classification_report.txt", tmp_path / "metrics.json"
+    a.write_text("report")
+    b.write_text("{}")
+    tracking.attach_evaluation(run_id, {"f1": 0.5},
+                               artifacts=[("reports", a), ("reports", b)])
+
+    from mlflow import MlflowClient
+    listed = {f.path for f in MlflowClient().list_artifacts(run_id, "reports")}
+    assert listed == {"reports/classification_report.txt", "reports/metrics.json"}
+
+
+@pytest.mark.slow
+def test_a_missing_artifact_is_skipped_not_raised(tmp_path, monkeypatch):
+    """THE ONE BEHAVIOUR CHANGE IN THE MOVE, pinned deliberately. The old
+    scripts/evaluate.py logged the confusion matrix UNCONDITIONALLY and
+    existence-checked only the two report files; a missing plot would have
+    thrown inside the try and silently dropped the metrics logged after it.
+    Every artifact is now checked, so a missing file costs that file only."""
+    mlflow = _tracking_server(tmp_path, monkeypatch)
+    run_id = tracking.log_training_run({}, {})
+    tracking.attach_evaluation(run_id, {"f1": 0.5},
+                               artifacts=[("plots", tmp_path / "absent.png")])
+
+    assert mlflow.get_run(run_id).data.metrics["f1"] == pytest.approx(0.5)
+    from mlflow import MlflowClient
+    assert MlflowClient().list_artifacts(run_id, "plots") == []
