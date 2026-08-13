@@ -130,7 +130,8 @@ rakuten-image-mlops/
 │   ├── promote.py             # the ONLY thing that moves the production alias
 │   ├── check_split.py         # proves the shared split matches the image split
 │   ├── tune_fusion_weight.py  # measures the fusion weight
-│   └── check_ci_pins.py       # requirements-ci.txt must not drift
+│   ├── check_ci_pins.py       # requirements-ci.txt must not drift
+│   └── gen_dashboard.py       # generates + validates the Grafana dashboard JSON
 │
 ├── api/image_main.py          # FastAPI :8000  /predict /train /evaluate /health
 ├── api/text_main.py           # FastAPI :8001  /predict /predict/batch /health
@@ -439,6 +440,19 @@ sudo docker compose restart grafana      # after editing provisioning or a dashb
 Dashboards are provisioned from `grafana/dashboards/*.json` with
 `allowUiUpdates: false`. Edit the JSON and restart; changes made in the browser
 would be silently reverted, which is worse than being refused.
+
+`rakuten-overview.json` is **generated**, not hand-written — `make dashboard`
+(or `python scripts/gen_dashboard.py`). 13 panels on a 24-column grid is more
+geometry than a person can hold in their head, and none of it is checkable by
+CI: a dashboard is data, not code. The generator asserts what a browser would
+otherwise be the first to tell you — unique panel ids, no overlapping cells,
+nothing past column 24, one consistent datasource uid, and every instant query
+feeding a table carrying `format: "table"` (without it the panel renders "No
+data" even though the query is correct — three panels shipped that way once).
+
+`python scripts/gen_dashboard.py --check` writes nothing and exits non-zero if
+the committed JSON and the generator disagree. Run it after any dashboard edit;
+if you edited the JSON by hand, fold the change into the script instead.
 
 ---
 

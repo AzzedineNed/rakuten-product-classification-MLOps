@@ -6,7 +6,7 @@ PIP := .venv/bin/pip
 SOURCE ?=
 
 .PHONY: help setup install test test-fast collect collect-ens process train evaluate predict serve \
-        train-text evaluate-text \
+        train-text evaluate-text dashboard \
         docker-build docker-up docker-down clean
 
 help:
@@ -22,6 +22,7 @@ help:
 	@echo "  predict      predict one image       (IMG=path)"
 	@echo "  train-text     train the text model"
 	@echo "  evaluate-text  evaluate the text model on the test split"
+	@echo "  dashboard      regenerate the Grafana dashboard JSON (--check to verify)"
 	@echo "  serve        run the FastAPI app on :8000"
 	@echo "  docker-build / docker-up / docker-down"
 
@@ -68,6 +69,11 @@ train-text:
 
 evaluate-text:
 	$(PY) scripts/evaluate_text.py
+
+# Regenerate the provisioned Grafana dashboard. Grafana does not reload a
+# bind-mounted dashboard: restart it afterwards.
+dashboard:
+	$(PY) scripts/gen_dashboard.py
 
 serve:
 	$(PY) -m uvicorn api.image_main:app --host 0.0.0.0 --port 8000 --reload
