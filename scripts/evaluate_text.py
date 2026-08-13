@@ -18,9 +18,9 @@ Changes from feat/moussa-rakuten-code:src/evaluate.py:
     other, and a classification report is written next to them.
 
 Usage:
-    PYTHONPATH=src python -m rakuten_text.evaluate
-    PYTHONPATH=src python -m rakuten_text.evaluate --split val
-    PYTHONPATH=src python -m rakuten_text.evaluate --predict-test
+    python scripts/evaluate_text.py
+    python scripts/evaluate_text.py --split val
+    python scripts/evaluate_text.py --predict-test
 """
 from __future__ import annotations
 
@@ -40,12 +40,12 @@ from sklearn.metrics import (
     f1_score,
 )
 
+import _bootstrap  # noqa: F401
 from rakuten_common import split as shared
-
-from . import config, tracking
-from .predict import TfidfPredictor
-from .preprocessing import preparer_dataframe
-from .train import split_fingerprint
+from rakuten_common.split import split_fingerprint
+from rakuten_text import config, tracking
+from rakuten_text.predict import TfidfPredictor
+from rakuten_text.preprocessing import preparer_dataframe
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -58,7 +58,7 @@ def charger_split_meta() -> dict:
     if not config.SPLIT_PATH.exists():
         raise SystemExit(
             f"{config.SPLIT_PATH} introuvable. Ce fichier est écrit par "
-            "`python -m rakuten_text.train`. Sans lui, le split ne peut pas "
+            "`python scripts/train_text.py`. Sans lui, le split ne peut pas "
             "être vérifié — relancez l'entraînement."
         )
     with open(config.SPLIT_PATH, encoding="utf-8") as f:

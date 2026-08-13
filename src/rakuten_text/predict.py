@@ -34,7 +34,7 @@ class TfidfPredictor:
         """Charge les artefacts.
 
         prefer_registry=False (DEFAULT) — local disk only. This is what
-        rakuten_text.evaluate and scripts/tune_fusion_weight need: an
+        scripts/evaluate_text.py and scripts/tune_fusion_weight need: an
         evaluation must score the artifacts training just wrote, not whatever
         the registry currently serves, or the reported metrics describe a
         different model than the run they are attached to.
@@ -65,12 +65,12 @@ class TfidfPredictor:
         if not self.vectorizer_path.exists():
             raise FileNotFoundError(
                 f"Vectoriseur introuvable : {self.vectorizer_path}. "
-                "Lancez d'abord `PYTHONPATH=src python -m rakuten_text.train`."
+                "Lancez d'abord `python scripts/train_text.py`."
             )
         if not self.model_path.exists():
             raise FileNotFoundError(
                 f"Modèle introuvable : {self.model_path}. "
-                "Lancez d'abord `PYTHONPATH=src python -m rakuten_text.train`."
+                "Lancez d'abord `python scripts/train_text.py`."
             )
         self.vectorizer = joblib.load(self.vectorizer_path)
         self.model = joblib.load(self.model_path)

@@ -66,7 +66,7 @@ def test_local_load_reports_a_local_source(tmp_path):
 
 
 def test_default_load_never_touches_the_registry(tmp_path, monkeypatch):
-    """The DEFAULT must stay local-only. rakuten_text.evaluate and
+    """The DEFAULT must stay local-only. scripts/evaluate_text.py and
     scripts/tune_fusion_weight call load() with no arguments; if that ever
     started resolving the registry, an evaluation would silently score a
     different model than the one training just wrote.

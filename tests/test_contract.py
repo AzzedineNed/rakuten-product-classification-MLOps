@@ -183,3 +183,59 @@ def test_fusion_rejects_out_of_range_weight():
     for bad in (-0.1, 1.1):
         with pytest.raises(ValueError):
             fusion.weighted_average(a, a, text_weight=bad)
+
+# ---------------------------------------------------------------------------
+# split_fingerprint
+#
+# Moved into rakuten_common.split from rakuten_text/train.py when the text
+# entrypoints went to scripts/: evaluate imported it from train, and once both
+# were scripts that would have been script-importing-script, which does not
+# work. It is modality-agnostic anyway — it hashes labels.
+#
+# The fingerprint is a SAFETY device: train records it, evaluate re-checks it,
+# and a mismatch stops evaluation rather than scoring against a partition the
+# model was never fit on. So these test the properties that make it safe, not
+# just that it returns a string.
+# ---------------------------------------------------------------------------
+
+def test_split_fingerprint_ignores_order():
+    """Membership is what matters; a reordered CSV is the same split."""
+    from rakuten_common.split import split_fingerprint
+    assert split_fingerprint([10, 40, 2583, 1180]) == split_fingerprint([2583, 10, 1180, 40])
+
+
+def test_split_fingerprint_changes_when_membership_changes():
+    """THE point of the thing. If this ever stops holding, a regenerated or
+    filtered split would sail through evaluation unnoticed."""
+    from rakuten_common.split import split_fingerprint
+    base = [10, 40, 2583]
+    assert split_fingerprint(base) != split_fingerprint(base + [60])      # added
+    assert split_fingerprint(base) != split_fingerprint(base[:-1])        # removed
+    assert split_fingerprint(base) != split_fingerprint([10, 40, 2584])   # changed
+
+
+def test_split_fingerprint_is_stable_across_calls_and_types():
+    """Recorded in one process at train time and compared in another at
+    evaluate time, so it must not depend on hash randomisation or on whether
+    the labels arrive as a list or a pandas Index."""
+    import pandas as pd
+    from rakuten_common.split import split_fingerprint
+    labels = [10, 40, 2583, 1180]
+    first = split_fingerprint(labels)
+    assert first == split_fingerprint(labels)
+    assert first == split_fingerprint(pd.Index(labels))
+    assert first == split_fingerprint(tuple(labels))
+
+
+def test_split_fingerprint_is_a_short_hex_digest():
+    from rakuten_common.split import split_fingerprint
+    fp = split_fingerprint([1, 2, 3])
+    assert len(fp) == 16
+    assert all(c in "0123456789abcdef" for c in fp)
+
+
+def test_split_fingerprint_is_exported():
+    """It is part of rakuten_common's public surface now, not a private helper
+    that happens to be importable."""
+    from rakuten_common import split
+    assert "split_fingerprint" in split.__all__

@@ -81,7 +81,7 @@ Guarantees now enforced in code:
 - **Guarded merge.** Modalities are merged on the ID column with a row-count
   guard and a duplicate-id check, never by row position.
 - **Fingerprints.** `models/text/split.json` stores a SHA-256 of all three
-  splits; `rakuten_text/evaluate.py` verifies **all three** before scoring, so a
+  splits; `scripts/evaluate_text.py` verifies **all three** before scoring, so a
   change confined to training rows cannot pass unnoticed.
 - **Proof, not assertion.** `scripts/check_split.py` demonstrates on the real
   data that the shared module reproduces `rakuten_img.data.split_dataframe`
@@ -119,12 +119,13 @@ rakuten-image-mlops/
 │   ├── backbone.py            # frozen MobileNetV2 (the only module importing torch)
 │   ├── classifier.py          # build/save/load head, registry publish/pull, reorder
 │   └── ens_download.py
-├── src/rakuten_text/          # text modality
+├── src/rakuten_text/          # text modality (library only, no entrypoints)
 │   ├── config.py  preprocessing.py  predict.py
-│   ├── train.py  evaluate.py  tracking.py
+│   └── tracking.py            # all MLflow code for this modality
 │
-├── scripts/                   # thin CLI entrypoints over the packages
-│   ├── collect.py  process.py  train.py  evaluate.py  predict.py
+├── scripts/                   # EVERY entrypoint lives here, both modalities
+│   ├── collect.py  process.py  train.py  evaluate.py  predict.py   # image
+│   ├── train_text.py  evaluate_text.py                             # text
 │   ├── promote.py             # the ONLY thing that moves the production alias
 │   ├── check_split.py         # proves the shared split matches the image split
 │   ├── tune_fusion_weight.py  # measures the fusion weight
@@ -142,6 +143,37 @@ rakuten-image-mlops/
 ├── tests/                     # 79 tests, torch-free and data-free
 └── requirements.txt  requirements-ci.txt  pytest.ini  Dockerfile  docker-compose*.yml  Makefile
 ```
+
+---
+
+## Layout convention
+
+The two modalities were shaped differently for a while — text was ported from a
+standalone repo and kept its own habits. They now follow one rule set, written
+down here because a convention nobody wrote down is how the drift happened:
+
+1. **Packages under `src/` are libraries.** They export functions and classes
+   and contain no `if __name__ == "__main__"` block.
+2. **`scripts/` holds every entrypoint, for every modality.** Anything you run
+   is `python scripts/<something>.py`, never `python -m <package>.<module>`.
+3. **One `tracking.py` per modality** for all MLflow code.
+4. **One Makefile target per task per modality.**
+5. **Anything both modalities need lives in `rakuten_common/`** — that is why
+   `split_fingerprint` is there and not in a text module.
+
+Image entrypoints keep their bare names (`train.py`) and text ones take a
+`_text` suffix (`train_text.py`). Renaming the image scripts purely for
+symmetry would churn the Makefile, the README and the DAG's error messages
+without making anything work better.
+
+| task | image | text |
+|---|---|---|
+| collect | `make collect` / `scripts/collect.py` | shares the same raw data |
+| process | `make process` / `scripts/process.py` | n/a (no feature cache) |
+| train | `make train` / `scripts/train.py` | `make train-text` / `scripts/train_text.py` |
+| evaluate | `make evaluate` / `scripts/evaluate.py` | `make evaluate-text` / `scripts/evaluate_text.py` |
+| predict | `make predict IMG=…` / `scripts/predict.py` | via the API or `TfidfPredictor` |
+| serve | `make serve` / `api/image_main.py` | `api/text_main.py` |
 
 ---
 
@@ -199,9 +231,9 @@ python scripts/predict.py --image path/to/product.jpg --top-k 5
 ### Text pipeline
 
 ```bash
-PYTHONPATH=src python -m rakuten_text.train                   # ~3 min on 2 cores
-PYTHONPATH=src python -m rakuten_text.evaluate                # scores the TEST split, ~20s
-PYTHONPATH=src python -m rakuten_text.evaluate --split val    # re-score val
+python scripts/train_text.py                  # ~3 min on 2 cores
+python scripts/evaluate_text.py               # scores the TEST split, ~20s
+python scripts/evaluate_text.py --split val   # re-score val
 ```
 
 `--max-features` is the only training flag. `--test-size` and `--full` were

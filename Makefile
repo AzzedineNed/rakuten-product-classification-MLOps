@@ -6,6 +6,7 @@ PIP := .venv/bin/pip
 SOURCE ?=
 
 .PHONY: help setup install test test-fast collect collect-ens process train evaluate predict serve \
+        train-text evaluate-text \
         docker-build docker-up docker-down clean
 
 help:
@@ -19,6 +20,8 @@ help:
 	@echo "  train        train the classifier head"
 	@echo "  evaluate     evaluate on the test set"
 	@echo "  predict      predict one image       (IMG=path)"
+	@echo "  train-text     train the text model"
+	@echo "  evaluate-text  evaluate the text model on the test split"
 	@echo "  serve        run the FastAPI app on :8000"
 	@echo "  docker-build / docker-up / docker-down"
 
@@ -56,6 +59,15 @@ evaluate:
 
 predict:
 	$(PY) scripts/predict.py --image "$(IMG)"
+
+# --- text modality. One target per task per modality; the image targets above
+# --- keep their bare names because renaming them for symmetry alone would
+# --- churn the Makefile, the README and the DAG's error messages for nothing.
+train-text:
+	$(PY) scripts/train_text.py
+
+evaluate-text:
+	$(PY) scripts/evaluate_text.py
 
 serve:
 	$(PY) -m uvicorn api.image_main:app --host 0.0.0.0 --port 8000 --reload

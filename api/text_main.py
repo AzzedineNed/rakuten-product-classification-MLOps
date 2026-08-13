@@ -128,7 +128,7 @@ def _unavailable() -> Optional[JSONResponse]:
     return JSONResponse(
         status_code=503,
         content={"error": "Text model not loaded. Run "
-                          "`python -m rakuten_text.train` (or `dvc pull`)."},
+                          "`python scripts/train_text.py` (or `dvc pull`)."},
     )
 
 

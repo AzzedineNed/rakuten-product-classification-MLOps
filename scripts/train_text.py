@@ -26,13 +26,19 @@ relative to the original, and why:
      to DVC on every retrain.
 
 Usage:
-    PYTHONPATH=src python -m rakuten_text.train
-    PYTHONPATH=src python -m rakuten_text.train --max-features 10000
+    python scripts/train_text.py
+    python scripts/train_text.py --max-features 10000
+
+LOCATION: this is an ENTRYPOINT, so it lives in scripts/ like every other
+entrypoint in this repo. It used to be `python -m rakuten_text.train` inside the
+package, which made the text modality shaped differently from the image one for
+no reason other than its porting history. rakuten_text/__init__.py always
+claimed "Logic lives here; entrypoints stay thin, mirroring rakuten_img" -- this
+move makes that true.
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import logging
 import os
@@ -45,27 +51,16 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 
+import _bootstrap  # noqa: F401
 from rakuten_common import split as shared
-
-from . import config, tracking
-from .preprocessing import preparer_dataframe
+from rakuten_common.split import split_fingerprint
+from rakuten_text import config, tracking
+from rakuten_text.preprocessing import preparer_dataframe
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger("train-text")
-
-
-def split_fingerprint(labels) -> str:
-    """Stable hash of a split's membership, order-independent.
-
-    Recorded at train time and re-checked at evaluate time. If the CSVs are
-    regenerated, reordered, or filtered, the fingerprint changes and evaluation
-    refuses to run rather than scoring against a partition that no longer
-    matches the one the model was fit on.
-    """
-    joined = ",".join(str(x) for x in sorted(labels))
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
 
 
 def charger_donnees() -> pd.DataFrame:
@@ -188,7 +183,7 @@ def entrainer(args):
     )
 
     logger.info("Entraînement terminé. Le test set n'a PAS été touché ici — "
-                "utilisez `python -m rakuten_text.evaluate`.")
+                "utilisez `python scripts/evaluate_text.py`.")
     return metrics
 
 

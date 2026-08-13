@@ -25,6 +25,8 @@ WHAT IT DOES NOT DO
 """
 from __future__ import annotations
 
+import hashlib
+
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
@@ -35,6 +37,7 @@ __all__ = [
     "split_dataframe",
     "split_labels",
     "LABEL_COLUMN",
+    "split_fingerprint",
 ]
 
 LABEL_COLUMN = "prdtypecode"
@@ -120,3 +123,22 @@ def split_labels(df: pd.DataFrame | None = None) -> dict[str, pd.Index]:
     if len(parts["train"].union(parts["val"]).union(parts["test"])) != len(df):
         raise ValueError("Split partitions overlap -- a row is in two splits.")
     return parts
+
+
+def split_fingerprint(labels) -> str:
+    """Stable, order-independent hash of a split's membership.
+
+    Recorded at train time and re-checked at evaluate time. If the CSVs are
+    regenerated, reordered, or filtered, the fingerprint changes and evaluation
+    refuses to run rather than scoring against a partition that no longer
+    matches the one the model was fit on.
+
+    Lives HERE, not in an entrypoint. It was originally defined in
+    rakuten_text/train.py and imported by rakuten_text/evaluate.py; once both
+    of those moved to scripts/ that import would have been script-importing-
+    script, which does not work because scripts/ is not a package. It is also
+    modality-agnostic by nature — it hashes labels and knows nothing about text
+    — so rakuten_common is where it belonged all along.
+    """
+    joined = ",".join(str(x) for x in sorted(labels))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
