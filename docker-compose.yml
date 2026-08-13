@@ -102,15 +102,18 @@ services:
       - .env
     restart: unless-stopped
 
-    # TEMPORARILY RAISED FOR MEASUREMENT — 1g while this service only served.
-    # Serving was measured at 181 MiB; training in-container has NEVER been
-    # measured, and a peak cannot be measured under a cap low enough to kill the
-    # process producing it. So this is deliberately generous for ONE run, then
-    # tightened to the measured peak plus headroom, the way the image service's
-    # 2.5g was arrived at (idle 47 MiB / serving 442 MiB / retrain peak 1.48 GiB).
-    # DO NOT leave this at 2.5g: with the image service also at 2.5g, two
-    # concurrent retrains would not fit in 4.807 GiB.
-    mem_limit: 2.5g
+    # MEASURED, not guessed. Sampled every 2s through a full in-container
+    # retrain (POST /text/train, 78.2s fit over 67932 products):
+    #   serving only 181 MiB | RETRAIN PEAK 841.8 MiB | settled after 360.4 MiB.
+    # The settled figure is higher than the pre-training 181 MiB because CPython
+    # does not return all freed arenas to the OS, so it is the container's new
+    # resting size, not a leak.
+    #
+    # 1.5g is the peak plus ~78% headroom, the same proportion the image
+    # service's 2.5g gives its 1.48 GiB peak. The previous 1g would have put the
+    # peak at 84% of the ceiling — survivable on this run, and one larger
+    # vocabulary away from an OOM kill mid-training.
+    mem_limit: 1.5g
 
     healthcheck:
       test: ["CMD", "python", "-c",
