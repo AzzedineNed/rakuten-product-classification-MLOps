@@ -99,11 +99,54 @@ def _write_local(payload: dict = None) -> dict:
 # --------------------------------------------------------------------------
 # the serving fallback policy (no mlflow needed)
 # --------------------------------------------------------------------------
-def test_model_source_is_not_loaded_before_any_prediction(serving):
-    """Wart 3, pinned deliberately rather than fixed: /health reports
-    'not-loaded' until the first real /predict, because the payload resolves
-    lazily. A change here changes what the Grafana model table shows."""
+def test_model_source_is_not_loaded_before_anything_resolves(serving):
+    """The sentinel is the module's starting state, and it is what the API
+    publishes if resolution fails outright.
+
+    This used to pin wart 3, where /health said 'not-loaded' on a healthy
+    container until the first real /predict. The API now resolves eagerly at
+    startup (api/image_main.py's lifespan calls load() below), so this is no
+    longer what an operator sees - but the sentinel itself still has to exist
+    and still has to be the value before any resolution has happened.
+    """
     assert serving.model_source() == "not-loaded"
+
+
+def test_load_resolves_now_and_returns_where_the_model_came_from(serving, monkeypatch):
+    """The entry point the API's startup calls. Lazy resolution is what made
+    /health untruthful on a healthy container; this is what makes it eager."""
+    served = _payload("registry")
+    served["serving_source"] = "registry:rakuten-image-classifier@production/v2"
+    monkeypatch.setattr(tracking, "load_from_registry", lambda alias=None: served)
+
+    assert serving.model_source() == "not-loaded"
+    assert serving.load() == "registry:rakuten-image-classifier@production/v2"
+    assert serving.model_source() == "registry:rakuten-image-classifier@production/v2"
+
+
+def test_load_degrades_to_local_rather_than_raising(serving, monkeypatch):
+    """An unreachable registry must not stop the service booting, so the
+    fallback has to happen INSIDE load() and not in the caller's except."""
+    def _explode(alias=None):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(tracking, "load_from_registry", _explode)
+    _write_local()
+
+    assert serving.load() == f"local:{config.CLASSIFIER_PATH.name}"
+
+
+def test_load_raises_when_there_is_no_model_anywhere(serving, monkeypatch):
+    """The one case the API's lifespan has to catch: nothing to serve at all.
+    It logs and boots anyway, so /health can report it."""
+    def _explode(alias=None):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(tracking, "load_from_registry", _explode)
+    assert not config.CLASSIFIER_PATH.exists()
+
+    with pytest.raises(Exception):
+        serving.load()
 
 
 def test_registry_success_is_served_and_local_disk_is_not_read(serving, monkeypatch):

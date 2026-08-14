@@ -37,8 +37,9 @@ services:
     mem_limit: 2.5g
 
     # The image has no curl/wget (python:3.12-slim), so we use stdlib urllib.
-    # /health imports torch on first call, hence the tolerant timeout/retries:
-    # a slow reply during training must not flap the container to unhealthy.
+    # The model is now resolved in the startup lifespan, so nothing answers at
+    # all until that finishes - hence start_period. The tolerant timeout and
+    # retries then stop a slow reply during training flapping it to unhealthy.
     healthcheck:
       test: ["CMD", "python", "-c",
              "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/health', timeout=8).status==200 else sys.exit(1)"]

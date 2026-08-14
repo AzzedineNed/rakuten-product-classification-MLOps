@@ -24,7 +24,9 @@ Run:
 from __future__ import annotations
 
 import io
+import logging
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # Make the src package importable without install / PYTHONPATH.
@@ -38,9 +40,56 @@ from PIL import Image
 from rakuten_common.observability import PrometheusMiddleware, ServiceMetrics
 from rakuten_img import config
 
-app = FastAPI(title="Rakuten Image Classifier", version="1.0.0")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("api-image")
 
 METRICS = ServiceMetrics("image")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Resolve the served model at startup, mirroring the text service.
+
+    WHY EAGER. Resolution used to happen on the first /predict, so a healthy
+    container reported model_loaded=false and model_source=not-loaded until
+    someone happened to send traffic. That is indistinguishable, from outside,
+    from a container that cannot load its model at all, and it meant the two
+    services answered the same question in two different ways.
+
+    A failure is logged, not raised: the service still starts and /health
+    reports it truthfully, instead of a container that will not boot. The
+    registry fallback lives inside predict.load(), so an unreachable registry
+    degrades to the local .joblib rather than reaching this except at all.
+
+    WHAT THIS DOES NOT DO: warm the backbone. MobileNetV2 and its weights are
+    still loaded on the first prediction, so the first /predict stays slow.
+    That is a latency choice with its own memory profile, and it is not what
+    model_loaded means.
+
+    THE COST, stated plainly: with the retry added in 8e50577, an unreachable
+    registry now spends its budget HERE, at boot, rather than on the first
+    prediction. Worst case is about 35s before uvicorn accepts connections,
+    against a compose start_period of 30s plus five 30s healthcheck retries.
+    """
+    import predict as predict_script  # scripts/predict.py
+
+    try:
+        source = predict_script.load()
+        logger.info("Image model resolved from %s - API ready.", source)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Could not resolve the image model: %s: %s",
+                     type(exc).__name__, exc)
+        source = predict_script.model_source()
+    # Published in BOTH cases on purpose. On failure the source is still
+    # "not-loaded", and a gauge that says so is far more useful on a dashboard
+    # than an absent series, which is indistinguishable from a dead scrape.
+    METRICS.set_model_info("image", source)
+    yield
+
+
+app = FastAPI(title="Rakuten Image Classifier", version="1.0.0",
+              lifespan=lifespan)
 app.add_middleware(PrometheusMiddleware, metrics=METRICS)
 
 _TRAIN_STATUS: dict = {"state": "idle", "detail": None, "metrics": None}
@@ -83,10 +132,11 @@ def health():
     honest answer to "is there a local artifact here", which is worth knowing
     when a registry fetch has failed and the fallback is what is running.
 
-    This service resolves its model LAZILY, so model_loaded is false on a fresh
-    container until the first /predict. That is a real property of the design,
-    not an error, and it is why model_source is published from here as well as
-    after a prediction: whichever happens first, the gauge stops being empty.
+    The model is resolved EAGERLY in the lifespan, so model_loaded is true from
+    boot on a healthy container. It is false only when resolution actually
+    failed, which is now a real signal rather than "nobody has sent traffic
+    yet". The gauge is still published from here as well, so a scrape that
+    lands before any prediction still gets a series.
     """
     import predict as predict_script  # scripts/predict.py
 
@@ -120,8 +170,9 @@ async def predict_endpoint(file: UploadFile = File(...), top_k: int = Query(5, g
         for i in order
     ]
     METRICS.observe_prediction(top[0]["code"], top[0]["probability"])
-    # The model is only actually resolved on the first /predict, so this is the
-    # earliest point at which model_source() is truthful for this service.
+    # Refreshed rather than established: the lifespan has already resolved this.
+    # A /train run rewrites the local .joblib and can change the source, and
+    # this is the first point after that where the new value is observable.
     METRICS.set_model_info("image", predict_script.model_source())
 
     # Full vector + class order so a fusion layer can consume it directly.

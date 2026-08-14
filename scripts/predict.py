@@ -93,6 +93,22 @@ def _load_payload():
     return payload
 
 
+def load() -> str:
+    """Resolve the served model NOW and return where it came from.
+
+    The public entry point for eager startup resolution, mirroring the text
+    side's predictor.load(). Everything else in this module resolves lazily on
+    the first prediction, which is what used to make /health answer
+    "not-loaded" on a container that was in fact perfectly healthy.
+
+    Raises only when NO model can be found at all. A registry failure is caught
+    inside _load_payload() and falls back to the local .joblib, so an
+    unreachable registry degrades rather than stopping the caller.
+    """
+    _load_payload()
+    return _SERVING_SOURCE
+
+
 def model_source() -> str:
     """Where the currently served model came from ('registry:...', 'local:...'),
     or 'not-loaded' before the first prediction. Used by the API's /health."""

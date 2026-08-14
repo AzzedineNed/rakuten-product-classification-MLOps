@@ -73,6 +73,20 @@ def _reset_job_status():
     im._EVAL_STATUS.update(idle)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_resolution_at_startup(monkeypatch):
+    """Stop the startup lifespan from resolving a model for real.
+
+    Every test here enters the app as a context manager, which is what runs the
+    lifespan, and the lifespan now calls predict.load(). Left alone that would
+    read whatever .joblib happens to sit in models/ and, if MLFLOW_TRACKING_URI
+    is set in the shell, TALK TO DAGSHUB - so the suite's result would depend on
+    the developer's environment and the network. The stub reports whatever
+    model_source() currently says, which is what each test has already faked.
+    """
+    monkeypatch.setattr(predict_script, "load", predict_script.model_source)
+
+
 def _vector(winner: int, peak: float = 0.6) -> np.ndarray:
     """A normalised, NON-degenerate probability vector peaking at `winner`."""
     rest = (1.0 - peak) / (N - 1)
@@ -655,3 +669,96 @@ def test_an_unmatched_route_does_not_create_a_new_label_value():
         assert client.get("/no-such-route-98765").status_code == 404
 
     assert _sample("rakuten_http_requests_total", labels) - before == 1.0
+
+
+# --------------------------------------------------------------------------- #
+# Startup resolution (the lifespan)
+#
+# This service used to resolve its model on the FIRST /predict. A healthy
+# container therefore answered model_loaded=false and model_source=not-loaded
+# until traffic arrived, which from the outside is indistinguishable from a
+# container that cannot load its model at all, and it meant the two modalities
+# answered the same question in two different ways. These tests pin the eager
+# behaviour and, just as importantly, that a failure to resolve still lets the
+# service boot.
+# --------------------------------------------------------------------------- #
+def _startup(monkeypatch, *, source=None, exc=None):
+    """Force the outcome of the startup resolution. Returns the call counter.
+
+    Overrides the autouse stub, so the lifespan runs against this instead.
+    """
+    calls = []
+
+    def fake_load():
+        calls.append(True)
+        if exc is not None:
+            raise exc
+        monkeypatch.setattr(predict_script, "model_source", lambda: source)
+        return source
+
+    monkeypatch.setattr(predict_script, "model_source",
+                        lambda: predict_script.NOT_LOADED)
+    monkeypatch.setattr(predict_script, "load", fake_load)
+    return calls
+
+
+def test_health_reports_a_model_from_boot_with_no_prediction(monkeypatch):
+    """THE WART THIS CLOSES. No /predict is sent anywhere in this test."""
+    _startup(monkeypatch, source="registry:m@production/v2")
+
+    with _client() as client:
+        body = client.get("/health").json()
+
+    assert body["model_loaded"] is True
+    assert body["model_source"] == "registry:m@production/v2"
+
+
+def test_startup_survives_a_resolution_failure(monkeypatch):
+    """A missing or corrupt artifact must NOT stop the service booting. The
+    lifespan catches Exception so a broken model lands in /health instead of a
+    container that will not start."""
+    _startup(monkeypatch, exc=FileNotFoundError("no artifacts in this test"))
+
+    with _client() as client:
+        body = client.get("/health").json()
+
+    assert body["model_loaded"] is False
+    assert body["model_source"] == predict_script.NOT_LOADED
+
+
+def test_model_info_gauge_is_published_even_when_resolution_failed(monkeypatch):
+    """An absent series is indistinguishable from a dead scrape, so the gauge
+    is set in BOTH branches of the lifespan."""
+    _startup(monkeypatch, exc=RuntimeError("registry and disk both gone"))
+
+    with _client():
+        pass
+
+    assert _sample("rakuten_model_info", {
+        "service": "image", "modality": "image",
+        "source": predict_script.NOT_LOADED}) == 1.0
+
+
+def test_the_gauge_carries_the_real_source_before_any_traffic(monkeypatch):
+    _startup(monkeypatch, source="registry:m@production/v2")
+
+    with _client():
+        pass
+
+    assert _sample("rakuten_model_info", {
+        "service": "image", "modality": "image",
+        "source": "registry:m@production/v2"}) == 1.0
+
+
+def test_the_registry_is_consulted_once_at_startup_and_not_per_request(monkeypatch):
+    """The promise that lets a registry outage leave live traffic alone: the
+    resolution happens exactly once, at boot, never on the request path."""
+    calls = _startup(monkeypatch, source="registry:m@production/v2")
+    _stub_predict(monkeypatch, source="registry:m@production/v2")
+
+    with _client() as client:
+        client.get("/health")
+        client.post("/predict", files={"file": ("p.png", _png(), "image/png")})
+        client.get("/health")
+
+    assert len(calls) == 1
