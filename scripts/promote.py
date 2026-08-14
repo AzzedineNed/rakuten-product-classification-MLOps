@@ -29,6 +29,7 @@ import time
 import _bootstrap  # noqa: F401
 
 from rakuten_img import config
+from rakuten_text import config as text_config
 from rakuten_common.registry import (
     ALIAS_LOOKUP_ATTEMPTS,
     ALIAS_RETRY_DELAYS,
@@ -192,8 +193,16 @@ def promote(client, name: str, alias: str, version: str) -> None:
               f"--list once the registry answers.")
     elif str(now) != str(version):
         sys.exit(f"❌ Alias did not move (reads back as {now!r}).")
-    moved = f"v{previous} -> v{version}" if previous else f"-> v{version}"
-    print(f"🏷️  '{alias}' {moved} on '{name}'.")
+    unchanged = previous is not None and str(previous) == str(version)
+    if unchanged:
+        # Re-running the same promotion is harmless and sometimes deliberate
+        # (re-stamping who and when), but printing "v1 -> v1" reads like a
+        # move that did not happen.
+        print(f"🏷️  '{alias}' was already on v{version} of '{name}'. "
+              f"Re-stamped, nothing moved.")
+    else:
+        moved = f"v{previous} -> v{version}" if previous else f"-> v{version}"
+        print(f"🏷️  '{alias}' {moved} on '{name}'.")
 
     # THE AUDIT TRAIL. Moving an alias is DESTRUCTIVE: MLflow removes it from
     # the old version and keeps no history, so without these tags "what was in
@@ -204,7 +213,9 @@ def promote(client, name: str, alias: str, version: str) -> None:
     _tag(client, name, str(version), {
         "promoted_at": when,
         "promoted_by": who,
-        "promoted_from": f"v{previous}" if previous else "none",
+        # "v1" on v1 itself would be a lie about where it came from.
+        "promoted_from": "(unchanged)" if unchanged
+                         else (f"v{previous}" if previous else "none"),
         "promoted_alias": alias,
     })
     if previous and str(previous) != str(version):
@@ -214,8 +225,11 @@ def promote(client, name: str, alias: str, version: str) -> None:
             "demoted_to": f"v{version}",
         })
 
-    print("ℹ️  Restart the API process for the change to take effect "
-          "(the served model is cached for the process lifetime).")
+    if not unchanged:
+        # Only worth saying when something actually changed. Both services
+        # resolve once at startup and cache for the process lifetime.
+        print("ℹ️  Restart the API process for the change to take effect "
+              "(the served model is cached for the process lifetime).")
 
 
 def demote(client, name: str, alias: str) -> None:
@@ -245,19 +259,30 @@ def main() -> None:
     ap.add_argument("--version", help="Version number to promote, e.g. 2.")
     ap.add_argument("--alias", default=config.PRODUCTION_ALIAS,
                     help=f"Alias to move (default: {config.PRODUCTION_ALIAS}).")
-    ap.add_argument("--model", default=config.REGISTERED_MODEL_NAME,
-                    help=f"Registered model (default: {config.REGISTERED_MODEL_NAME}).")
+    ap.add_argument("--model", default=None,
+                    help=f"Registered model (default: {config.REGISTERED_MODEL_NAME}; "
+                         f"--list with no --model shows BOTH modalities).")
     ap.add_argument("--list", action="store_true", help="List versions and exit.")
     ap.add_argument("--demote", action="store_true", help="Remove the alias.")
     args = ap.parse_args()
 
     client = _client()
+    # --list defaulted to the IMAGE model, so "promote.py --list" answered
+    # "what is promoted?" for half the system and looked like the whole
+    # answer. Listing is read-only, so showing both costs nothing. A write
+    # still defaults to one model rather than guessing.
+    default_model = config.REGISTERED_MODEL_NAME
     if args.list:
-        list_versions(client, args.model, args.alias)
+        names = [args.model] if args.model else [
+            default_model, text_config.REGISTERED_MODEL_NAME]
+        for index, name in enumerate(names):
+            if index:
+                print()
+            list_versions(client, name, args.alias)
     elif args.demote:
-        demote(client, args.model, args.alias)
+        demote(client, args.model or default_model, args.alias)
     elif args.version:
-        promote(client, args.model, args.alias, str(args.version))
+        promote(client, args.model or default_model, args.alias, str(args.version))
     else:
         ap.error("give one of --list, --version N, or --demote")
 

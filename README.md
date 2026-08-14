@@ -305,13 +305,21 @@ other with `degraded=true` plus an `errors` block; if both fail, 502.
 
 `GET /health` reports the outcome as `model_source`, e.g.
 `registry:rakuten-text-classifier@production/v1` for a deliberate promotion,
-`registry:.../v6 (unpromoted)` for a fallback to the newest version, or
-`local:...` when the registry was not reachable. That field, not `model_path`,
-is the answer to "which model is serving?".
+`registry:.../v6 (unpromoted)` for a fallback to the newest version because no
+alias is set, `registry:.../v6 (unpromoted, alias lookup failed)` when an alias
+may well exist but the registry would not say, or `local:...` when the registry
+was not reachable at all. That field, not `model_path`, is the answer to "which
+model is serving?".
 
-The two services differ in *when* they resolve: the text service loads eagerly at
-startup (its artifacts are ~2.7 MB), the image service lazily on first `/predict`
-(torch is expensive to import). Neither consults the registry per request.
+The two degraded strings are kept apart on purpose. The first means there is
+nothing to honour; the second means a promotion may be being ignored and the
+service should be restarted once the registry answers. The dashboard's
+**Services on a degraded model** panel counts both, plus `not-loaded`.
+
+**Both** services resolve **eagerly at startup**, in a FastAPI lifespan, and
+never per request. A registry outage therefore cannot slow or break traffic
+already being served, and `model_loaded` in `/health` means what it says from
+boot rather than "somebody has sent a request".
 
 Serving never hard-fails on a network problem. **Training never promotes**: the
 `production` alias moves only via `scripts/promote.py`. Because the resolved
@@ -555,16 +563,20 @@ Python 3.12, as **two jobs in parallel**:
 
 | job | installs | runs |
 |---|---|---|
-| `pytest (python 3.12, pinned)` | `requirements-ci.txt` | 62 pass, 17 skip |
+| `pytest (python 3.12, pinned)` | `requirements-ci.txt` | everything except the real-registry tests |
 | `pytest (python 3.12, with mlflow)` | the same, plus mlflow | the whole suite |
 
 The first job installs a deliberate **subset** of `requirements.txt` that omits
 mlflow, dagshub, dvc and the API stack, none of which the tests import (every
 such import in `src/` is lazy). Measured: 128s and 995 MB for the full file
-versus 65s and 467 MB for the subset. The 17 tests that stand up a real MLflow
+versus 65s and 467 MB for the subset. The tests that stand up a real MLflow
 registry `importorskip` there rather than fail.
 
-The second job exists because those 17 tests cover the rule that decides **which
+Exact pass and skip counts are deliberately NOT written here. Nothing checks a
+number in a README, so it silently rots: this table claimed 62 pass and 17 skip
+for months while the real figures were several times that.
+
+The second job exists because those tests cover the rule that decides **which
 model version serves traffic**, on both modalities. Too important to be
 exercised only on a laptop. It pays the mlflow install so they actually run, and
 it deliberately applies **no marker filter**: filtering on `-m slow` would let a

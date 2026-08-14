@@ -121,7 +121,12 @@ def test_a_rejected_tag_never_undoes_a_completed_promotion(tmp_path, monkeypatch
 @pytest.mark.slow
 def test_promoting_the_same_version_twice_does_not_self_demote(tmp_path, monkeypatch):
     """Re-promoting the version that is already serving is a no-op in MLflow's
-    eyes; stamping it as demoted would invent an outage that never happened."""
+    eyes; stamping it as demoted would invent an outage that never happened.
+
+    promoted_from used to come out as the version's OWN number here, which
+    claims it was promoted from itself. It now says "(unchanged)", which is
+    what actually happened: the alias did not move and the tags were restamped.
+    """
     client, name, versions = _registry(tmp_path, monkeypatch, n_versions=1)
 
     promote_script.promote(client, name, "production", versions[0])
@@ -129,7 +134,37 @@ def test_promoting_the_same_version_twice_does_not_self_demote(tmp_path, monkeyp
 
     tags = _tags(client, name, versions[0])
     assert "demoted_at" not in tags
-    assert tags["promoted_from"] == f"v{versions[0]}"
+    assert tags["promoted_from"] == "(unchanged)"
+
+
+@pytest.mark.slow
+def test_a_self_promotion_does_not_report_a_move_or_ask_for_a_restart(
+        tmp_path, monkeypatch, capsys):
+    """Two cosmetics that both mislead: "v1 -> v1" reads as a move that did not
+    happen, and the restart hint sends an operator to bounce a service for a
+    change that was not made."""
+    client, name, versions = _registry(tmp_path, monkeypatch, n_versions=1)
+    promote_script.promote(client, name, "production", versions[0])
+    capsys.readouterr()
+
+    promote_script.promote(client, name, "production", versions[0])
+
+    out = capsys.readouterr().out
+    assert f"v{versions[0]} -> v{versions[0]}" not in out
+    assert "already on" in out
+    assert "Restart the API process" not in out
+
+
+@pytest.mark.slow
+def test_the_restart_hint_still_prints_on_a_real_move(tmp_path, monkeypatch, capsys):
+    """The guard above must not swallow the hint when it matters."""
+    client, name, versions = _registry(tmp_path, monkeypatch)
+    promote_script.promote(client, name, "production", versions[0])
+    capsys.readouterr()
+
+    promote_script.promote(client, name, "production", versions[1])
+
+    assert "Restart the API process" in capsys.readouterr().out
 
 
 def test_actor_falls_back_to_the_os_user(tmp_path, monkeypatch):
@@ -168,6 +203,23 @@ def no_sleep(monkeypatch):
     slept = []
     monkeypatch.setattr(promote_script.time, "sleep", slept.append)
     return slept
+
+
+def _second_model(client, monkeypatch, image_name):
+    """Point both config defaults at models that exist in THIS test registry.
+
+    The fixture registers one model under its own name, so main()'s defaults
+    would otherwise reach for the real rakuten-* names and find nothing.
+    """
+    # NOT derived from image_name: "<image_name>-text" CONTAINS image_name, so
+    # an "image model absent from the output" assertion would pass on the text
+    # model's own line and prove nothing.
+    text_name = "text-side-model"
+    client.create_registered_model(text_name)
+    monkeypatch.setattr(promote_script.config, "REGISTERED_MODEL_NAME", image_name)
+    monkeypatch.setattr(promote_script.text_config, "REGISTERED_MODEL_NAME", text_name)
+    monkeypatch.setattr(promote_script, "_client", lambda: client)
+    return text_name
 
 
 def _alias_truth(client, name, alias="production"):
@@ -326,3 +378,47 @@ def test_list_does_not_call_an_unreadable_alias_unset(
     assert "Re-run when the registry answers" in out
     # v1 really is serving, but this run has no right to say so
     assert "<-- SERVING" not in out
+
+
+@pytest.mark.slow
+def test_list_with_no_model_covers_both_modalities(tmp_path, monkeypatch, capsys):
+    """--model defaulted to the IMAGE model, so "promote.py --list" answered
+    "what is promoted?" for half the system while looking like the whole
+    answer. Listing is read-only, so both cost nothing."""
+    client, image_name, versions = _registry(tmp_path, monkeypatch, n_versions=1)
+    text_name = _second_model(client, monkeypatch, image_name)
+    monkeypatch.setattr(sys, "argv", ["promote.py", "--list"])
+
+    promote_script.main()
+
+    out = capsys.readouterr().out
+    assert image_name in out
+    assert text_name in out
+
+
+@pytest.mark.slow
+def test_an_explicit_model_lists_only_that_one(tmp_path, monkeypatch, capsys):
+    client, image_name, _ = _registry(tmp_path, monkeypatch, n_versions=1)
+    text_name = _second_model(client, monkeypatch, image_name)
+    monkeypatch.setattr(sys, "argv", ["promote.py", "--list", "--model", text_name])
+
+    promote_script.main()
+
+    out = capsys.readouterr().out
+    assert text_name in out
+    assert image_name not in out
+
+
+@pytest.mark.slow
+def test_a_write_still_defaults_to_one_model_rather_than_guessing(tmp_path,
+                                                                 monkeypatch):
+    """--list got wider; promote and demote deliberately did not. Writing to a
+    model the user did not name is a different class of surprise."""
+    client, image_name, versions = _registry(tmp_path, monkeypatch, n_versions=1)
+    _second_model(client, monkeypatch, image_name)
+    monkeypatch.setattr(sys, "argv",
+                        ["promote.py", "--version", str(versions[0])])
+
+    promote_script.main()
+
+    assert _alias_truth(client, image_name) == versions[0]
