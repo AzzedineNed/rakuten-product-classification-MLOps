@@ -1,4 +1,4 @@
-# Rakuten Product Classification — MLOps (image + text + fusion)
+# Rakuten Product Classification: MLOps (image + text + fusion)
 
 This repository holds the **MLOps phase** of our group's *Rakuten France
 Multimodal Product Data Classification* project (ENS Challenge Data #35). It
@@ -7,7 +7,7 @@ predicts a product `prdtypecode` (27 classes) from a product **image**, from its
 
 ![Architecture](docs/architecture.png)
 
-*Source: [`docs/architecture.excalidraw`](docs/architecture.excalidraw) — open it
+*Source: [`docs/architecture.excalidraw`](docs/architecture.excalidraw). Open it
 at [excalidraw.com](https://excalidraw.com) and re-export the PNG after any
 change.*
 
@@ -18,7 +18,7 @@ extractor** with a small scikit-learn head, and a **TF-IDF + LogisticRegression*
 text model. That choice is what makes the whole thing run on a modest laptop
 (2 cores, 8 GB RAM) and makes the `/train` endpoint return in seconds.
 
-The deliverable is a **working, reproducible, observable pipeline** — not a new
+The deliverable is a **working, reproducible, observable pipeline**, not a new
 SOTA score.
 
 ---
@@ -31,7 +31,7 @@ the registry.
 
 | model | accuracy | f1_weighted | f1_macro |
 |---|---|---|---|
-| image (MobileNetV2 + MLP head) | – | **0.5468** *(val)* | – |
+| image (MobileNetV2 + MLP head) | - | **0.5468** *(val)* | - |
 | text (TF-IDF + LogReg) | 0.7768 | **0.7780** | 0.7564 |
 | **fusion @ text_weight 0.85** | **0.7990** | **0.7973** | 0.7794 |
 
@@ -43,10 +43,10 @@ Fusion beats text alone by **+0.0193 weighted F1**.
 
 | text_weight | f1_weighted | |
 |---|---|---|
-| 0.00 | 0.5468 | endpoint check — must equal image alone |
+| 0.00 | 0.5468 | endpoint check, must equal image alone |
 | 0.50 | 0.6621 | the old default: **worse than text alone**, silently |
 | **0.85** | **0.7945** | chosen |
-| 1.00 | 0.7818 | endpoint check — must equal text alone |
+| 1.00 | 0.7818 | endpoint check, must equal text alone |
 
 The curve is flat between 0.80 and 0.90, so 0.85 is not a knife-edge fit, and
 test came out *above* val, so it did not overfit val. The two endpoint checks are
@@ -72,7 +72,7 @@ train 67932   val 8492   test 8492
 
 This is not a detail. Before it existed, the text model's 80/20 validation set
 was **exactly the image pipeline's val + test blocks combined** (8492 + 8492 =
-16984 rows) — text was being scored on rows the image pipeline held out, so the
+16984 rows). Text was being scored on rows the image pipeline held out, so the
 two numbers were never comparable and fusion could not be evaluated honestly.
 
 Guarantees now enforced in code:
@@ -85,12 +85,12 @@ Guarantees now enforced in code:
   change confined to training rows cannot pass unnoticed.
 - **Proof, not assertion.** `scripts/check_split.py` demonstrates on the real
   data that the shared module reproduces `rakuten_img.data.split_dataframe`
-  exactly — identical index, order and membership, 27 classes in each split.
+  exactly: identical index, order and membership, 27 classes in each split.
 
 ### Canonical class order (the fusion contract)
 
 > Every probability vector produced anywhere in this repo is ordered by
-> `config.CANONICAL_CLASSES` — the 27 `prdtypecode`s sorted **numerically**.
+> `config.CANONICAL_CLASSES`, the 27 `prdtypecode`s sorted **numerically**.
 
 Verified at train time (training aborts if `classes_` disagrees) and at predict
 time. The fusion gateway **refuses to fuse** if an upstream reports a different
@@ -150,7 +150,7 @@ rakuten-image-mlops/
 
 ## Layout convention
 
-The two modalities were shaped differently for a while — text was ported from a
+The two modalities were shaped differently for a while. Text was ported from a
 standalone repo and kept its own habits. They now follow one rule set, written
 down here because a convention nobody wrote down is how the drift happened:
 
@@ -160,7 +160,7 @@ down here because a convention nobody wrote down is how the drift happened:
    is `python scripts/<something>.py`, never `python -m <package>.<module>`.
 3. **One `tracking.py` per modality** for all MLflow code.
 4. **One Makefile target per task per modality.**
-5. **Anything both modalities need lives in `rakuten_common/`** — that is why
+5. **Anything both modalities need lives in `rakuten_common/`**, which is why
    `split_fingerprint` is there and not in a text module.
 
 Image entrypoints keep their bare names (`train.py`) and text ones take a
@@ -174,7 +174,7 @@ without making anything work better.
 | process | `make process` / `scripts/process.py` | n/a (no feature cache) |
 | train | `make train` / `scripts/train.py` | `make train-text` / `scripts/train_text.py` |
 | evaluate | `make evaluate` / `scripts/evaluate.py` | `make evaluate-text` / `scripts/evaluate_text.py` |
-| predict | `make predict IMG=…` / `scripts/predict.py` | via the API or `TfidfPredictor` |
+| predict | `make predict IMG=...` / `scripts/predict.py` | via the API or `TfidfPredictor` |
 | serve | `make serve` / `api/image_main.py` | `api/text_main.py` |
 
 ---
@@ -194,7 +194,7 @@ pip install -r requirements.txt
 Run the tests (need neither torch nor data):
 
 ```bash
-make test             # 248 tests
+make test             # the whole suite
 ```
 
 > **Pins are load-bearing, but only one of them is forced.** `numpy` stays `<2`
@@ -252,7 +252,7 @@ removed deliberately: a flag that cannot change the shared split is a lie.
 python scripts/tune_fusion_weight.py        # sweeps the weight on val, ~19s
 ```
 
-All of the above are also `make` targets — run `make help`.
+All of the above are also `make` targets, so run `make help`.
 
 ---
 
@@ -265,10 +265,10 @@ the `proxy_pass` target.
 | route | goes to | notes |
 |---|---|---|
 | `/` `/predict` `/train` `/evaluate` | image service | unchanged legacy paths; the Airflow DAG drives these |
-| `/text/…` | text service | prefix stripped |
-| `/fusion/…` | gateway | prefix stripped; fans out to both services |
-| `/grafana/…` | Grafana | prefix **preserved** — Grafana serves under the sub-path |
-| `/prometheus/…` | Prometheus | prefix stripped; **basic auth** |
+| `/text/...` | text service | prefix stripped |
+| `/fusion/...` | gateway | prefix stripped; fans out to both services |
+| `/grafana/...` | Grafana | prefix **preserved**, Grafana serves under the sub-path |
+| `/prometheus/...` | Prometheus | prefix stripped; **basic auth** |
 
 `/text`, `/fusion`, `/grafana` and `/prometheus` without the trailing slash
 301-redirect to the slashed form. Basic auth guards `/train`, `/train/status`,
@@ -297,31 +297,31 @@ other with `degraded=true` plus an `errors` block; if both fail, 502.
 **Both** serving services follow the same rule, via the shared
 `rakuten_common/registry.py`:
 
-1. **MLflow Model Registry, alias first** — the version carrying the
+1. **MLflow Model Registry, alias first**: the version carrying the
    `production` alias.
 2. **Newest registered version**, labelled `(unpromoted)`, if no alias resolves.
-3. **Local artifacts** if the registry is unreachable or tracking is unset —
+3. **Local artifacts** if the registry is unreachable or tracking is unset:
    `models/image_classifier.joblib` for image, `models/text/*.pkl` for text.
 
 `GET /health` reports the outcome as `model_source`, e.g.
 `registry:rakuten-text-classifier@production/v1` for a deliberate promotion,
-`registry:…/v6 (unpromoted)` for a fallback to the newest version, or
-`local:…` when the registry was not reachable. That field — not `model_path` —
+`registry:.../v6 (unpromoted)` for a fallback to the newest version, or
+`local:...` when the registry was not reachable. That field, not `model_path`,
 is the answer to "which model is serving?".
 
 The two services differ in *when* they resolve: the text service loads eagerly at
 startup (its artifacts are ~2.7 MB), the image service lazily on first `/predict`
 (torch is expensive to import). Neither consults the registry per request.
 
-Serving never hard-fails on a network problem. **Training never promotes** — the
+Serving never hard-fails on a network problem. **Training never promotes**: the
 `production` alias moves only via `scripts/promote.py`. Because the resolved
 model is cached for the process lifetime, `docker compose restart api` (or
 `text-api`) is what picks up a newly promoted version.
 
 A serving process caps MLflow's HTTP retries (2 retries, 10s timeout) rather than
 using its shipped defaults. Measured: against an unreachable tracking server the
-defaults blocked for **over 170 seconds**, which — with compose's healthcheck and
-the gateway's `depends_on: service_healthy` — would take the whole stack down
+defaults blocked for **over 170 seconds**, which, with compose's healthcheck and
+the gateway's `depends_on: service_healthy`, would take the whole stack down
 during a DagsHub outage instead of degrading to the local model. With the cap the
 same startup took 10.7s. Raise `MLFLOW_HTTP_REQUEST_MAX_RETRIES` /
 `MLFLOW_HTTP_REQUEST_TIMEOUT` to override.
@@ -329,7 +329,7 @@ same startup took 10.7s. Raise `MLFLOW_HTTP_REQUEST_MAX_RETRIES` /
 Both modalities cap it, but they pay it at different moments. The text service
 resolves the registry when it loads its model, so an outage delays **startup**.
 The image service resolves lazily on the first `/predict`, so the same outage
-delays **one request** instead — once, because the failure latches and every
+delays **one request** instead, once, because the failure latches and every
 later request goes straight to the local artifact.
 
 ---
@@ -371,8 +371,8 @@ excluded by `.dockerignore`, so credentials are never baked into image layers.
 
 > ⚠️ **Nginx does not reload a bind-mounted config.** After editing
 > `nginx/default.conf` you **must** run `docker compose restart nginx`. The tell
-> that you forgot: `/text/health` returns FastAPI's `{"detail":"Not Found"}` —
-> a 404 *body* means you reached a FastAPI app, just the wrong one.
+> that you forgot: `/text/health` returns FastAPI's `{"detail":"Not Found"}`.
+> A 404 *body* means you reached a FastAPI app, just the wrong one.
 
 ---
 
@@ -380,7 +380,7 @@ excluded by `.dockerignore`, so credentials are never baked into image layers.
 
 All three services expose `/metrics`. Prometheus scrapes them every 15s over the
 compose network and Grafana renders one provisioned dashboard. Neither publishes
-a host port — both are reached through nginx.
+a host port. Both are reached through nginx.
 
 | URL | auth |
 |---|---|
@@ -414,7 +414,7 @@ forgotten password can only be replaced, never recovered.
 
 `rakuten_model_info` is the dashboard counterpart of `/health`'s `model_source`:
 it reads from the running process, not from disk. The metric keeps its
-`modality` label — grouping by it is useful — but the dashboard's serving table
+`modality` label, and grouping by it is useful, but the dashboard's serving table
 hides that column, because it duplicates `service` on every row except the
 gateway's (`fusion` vs `gateway`). The image service reports
 `not-loaded` until its first real `/predict`, which is the documented lazy-load
@@ -438,7 +438,7 @@ dependencies and cannot disturb a pin.
 ### Editing the configuration
 
 Neither `prometheus/prometheus.yml` nor `grafana/provisioning/` is re-read while
-running — both are bind-mounted:
+running, and both are bind-mounted:
 
 ```bash
 sudo docker compose restart prometheus   # after editing the scrape config
@@ -449,14 +449,14 @@ Dashboards are provisioned from `grafana/dashboards/*.json` with
 `allowUiUpdates: false`. Edit the JSON and restart; changes made in the browser
 would be silently reverted, which is worse than being refused.
 
-`rakuten-overview.json` is **generated**, not hand-written — `make dashboard`
+`rakuten-overview.json` is **generated**, not hand-written. `make dashboard`
 (or `python scripts/gen_dashboard.py`). 13 panels on a 24-column grid is more
 geometry than a person can hold in their head, and none of it is checkable by
 CI: a dashboard is data, not code. The generator asserts what a browser would
-otherwise be the first to tell you — unique panel ids, no overlapping cells,
+otherwise be the first to tell you: unique panel ids, no overlapping cells,
 nothing past column 24, one consistent datasource uid, and every instant query
 feeding a table carrying `format: "table"` (without it the panel renders "No
-data" even though the query is correct — three panels shipped that way once).
+data" even though the query is correct, and three panels shipped that way once).
 
 `python scripts/gen_dashboard.py --check` writes nothing and exits non-zero if
 the committed JSON and the generator disagree. Run it after any dashboard edit;
@@ -468,15 +468,15 @@ if you edited the JSON by hand, fold the change into the script instead.
 
 One account token drives three things:
 
-- **MLflow tracking** — `train.py` logs params and train/val metrics;
+- **MLflow tracking**: `train.py` logs params and train/val metrics;
   `evaluate.py` reopens the **same run** (the run_id is stored in the saved model
   payload) and attaches test metrics, the classification report and the confusion
   matrix. One run tells the full story. Both modalities do this.
-- **Model Registry** — two registered models: `rakuten-image-classifier`
-  (`production` → v2, six versions) and `rakuten-text-classifier`
-  (`production` → v1). Both are served alias-first; promoting the text model did
+- **Model Registry**: two registered models: `rakuten-image-classifier`
+  (`production` -> v2) and `rakuten-text-classifier`
+  (`production` -> v1). Both are served alias-first; promoting the text model did
   not move image serving at all.
-- **DVC** — `data/raw` and `models` are tracked and pushed to the DagsHub remote
+- **DVC**: `data/raw` and `models` are tracked and pushed to the DagsHub remote
   over HTTP. Pointer files are committed; the data never is.
 
 Everything is **best-effort by design**: if `MLFLOW_TRACKING_URI` is unset or the
@@ -491,7 +491,7 @@ Both files are gitignored. Each person uses their own token.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `RAKUTEN_RAW_SOURCE` | – | default `--source` for collect.py |
+| `RAKUTEN_RAW_SOURCE` | - | default `--source` for collect.py |
 | `RAKUTEN_DATA_DIR` | `./data` | data root |
 | `RAKUTEN_MODELS_DIR` | `./models` | where classifiers are saved |
 | `RAKUTEN_REPORTS_DIR` | `./reports` | where evaluate.py writes results |
@@ -499,18 +499,18 @@ Both files are gitignored. Each person uses their own token.
 | `RAKUTEN_FEATURE_BATCH` | `64` | backbone batch size |
 | `RAKUTEN_REGISTERED_MODEL` | `rakuten-image-classifier` | registry name (image) |
 | `RAKUTEN_PRODUCTION_ALIAS` | `production` | alias consulted first when serving |
-| `MLFLOW_TRACKING_URI` | – | DagsHub MLflow endpoint; unset = tracking off |
-| `MLFLOW_TRACKING_USERNAME` / `_PASSWORD` | – | DagsHub username / token |
+| `MLFLOW_TRACKING_URI` | - | DagsHub MLflow endpoint; unset = tracking off |
+| `MLFLOW_TRACKING_USERNAME` / `_PASSWORD` | - | DagsHub username / token |
 | `MLFLOW_EXPERIMENT_NAME` | `rakuten-image` | experiment for the image runs |
 | `RAKUTEN_TEXT_REGISTERED_MODEL` | `rakuten-text-classifier` | registry name (text) |
 | `RAKUTEN_TEXT_EXPERIMENT` | `rakuten-text` | experiment for the text runs |
 | `MLFLOW_HTTP_REQUEST_MAX_RETRIES` | `2` when serving | capped so a dead registry cannot hang startup |
 | `MLFLOW_HTTP_REQUEST_TIMEOUT` | `10` when serving | same reason |
 | `GRAFANA_ADMIN_USER` | `admin` | Grafana login user |
-| `GRAFANA_ADMIN_PASSWORD` | **none — required** | compose refuses to start without it, rather than falling back to Grafana's `admin/admin` |
+| `GRAFANA_ADMIN_PASSWORD` | **none, required** | compose refuses to start without it, rather than falling back to Grafana's `admin/admin` |
 | `GRAFANA_ROOT_URL` | `http://localhost/grafana/` | set this if you reach the host by LAN IP |
 | `PROMETHEUS_EXTERNAL_URL` | `http://localhost/prometheus/` | same reason |
-| `ENS_USERNAME` / `ENS_PASSWORD` | – | credentials for `collect.py --from-ens` |
+| `ENS_USERNAME` / `ENS_PASSWORD` | - | credentials for `collect.py --from-ens` |
 | `ENS_BASE` | `https://challengedata.ens.fr` | ENS site base URL |
 | `ENS_CHALLENGE_ID` | `35` | ENS challenge number |
 
@@ -522,8 +522,8 @@ Text artifacts go to `models/text/` and `reports/text/`; the text experiment is
 ## Orchestration (Airflow)
 
 Airflow runs as a **separate compose project** (`rakuten-airflow`, Airflow 3.3.0,
-LocalExecutor) and talks to the API **over HTTP through nginx** with basic auth —
-it does not import the pipeline code.
+LocalExecutor) and talks to the API **over HTTP through nginx** with basic auth.
+It does not import the pipeline code.
 
 ```bash
 # .env.airflow must set AIRFLOW_UID to your host uid, or the containers
@@ -556,7 +556,7 @@ Python 3.12, as **two jobs in parallel**:
 | job | installs | runs |
 |---|---|---|
 | `pytest (python 3.12, pinned)` | `requirements-ci.txt` | 62 pass, 17 skip |
-| `pytest (python 3.12, with mlflow)` | the same, plus mlflow | all 79 |
+| `pytest (python 3.12, with mlflow)` | the same, plus mlflow | the whole suite |
 
 The first job installs a deliberate **subset** of `requirements.txt` that omits
 mlflow, dagshub, dvc and the API stack, none of which the tests import (every
@@ -565,7 +565,7 @@ versus 65s and 467 MB for the subset. The 17 tests that stand up a real MLflow
 registry `importorskip` there rather than fail.
 
 The second job exists because those 17 tests cover the rule that decides **which
-model version serves traffic**, on both modalities — too important to be
+model version serves traffic**, on both modalities. Too important to be
 exercised only on a laptop. It pays the mlflow install so they actually run, and
 it deliberately applies **no marker filter**: filtering on `-m slow` would let a
 test whose marker someone forgot run in neither job and vanish from CI silently.
@@ -573,14 +573,14 @@ Its mlflow pin is read out of `requirements.txt` at run time, never written into
 the workflow, so it cannot drift.
 
 `scripts/check_ci_pins.py` runs **before** the install and fails if the two files
-ever disagree on a version — a subset is only trustworthy if it cannot drift.
+ever disagree on a version: a subset is only trustworthy if it cannot drift.
 
 ---
 
 ## Contributing
 
 1. **Branch off `main`**: `git checkout -b your-feature`.
-2. **Run `make test` before opening a PR** — it runs all 79. Use
+2. **Run `make test` before opening a PR**: it runs the whole suite. Use
    `make test-fast` (`-m "not slow"`) during the edit loop: it skips the tests
    that stand up a real MLflow registry, which are the bulk of the wall time.
    CI runs everything regardless, so a fast local pass is not a green build.
@@ -597,13 +597,13 @@ ever disagree on a version — a subset is only trustworthy if it cannot drift.
 - **Resampling** balances each train class to ~4000 samples at the *feature*
   level via row indices + a memory-mapped read, so it never holds multiple full
   copies in RAM. `X_train.npy` is therefore the **resampled** set (108000 =
-  27 × 4000) and train row identity is unrecoverable by design — use `train_raw`
+  27 x 4000) and train row identity is unrecoverable by design, so use `train_raw`
   for the 67932 pre-resampling rows.
 - **Crash-safe & resumable:** `process.py` writes each split's raw features
   before resampling, so the expensive backbone pass is never lost.
-- **Processed images are not written to disk** — straight from raw image to
+- **Processed images are not written to disk**: straight from raw image to
   feature vector, saving ~2.2 GB and an I/O pass.
-- **The MLP's internal "Validation score" during training is optimistic** — it is
+- **The MLP's internal "Validation score" during training is optimistic**: it is
   measured on a slice of the *resampled* train set. The number that counts is
   weighted F1 on the untouched val/test splits.
 - **`/health`'s `model_loaded` means a model is resolved and serving**, the same
@@ -635,7 +635,7 @@ ever disagree on a version — a subset is only trustworthy if it cannot drift.
 - **The metrics counters are in-process and reset when a container is
   recreated.** `docker compose up -d` after a config change zeroes
   `rakuten_predictions_total` and the fusion counters, and a counter with no
-  increments emits no series at all — so freshly-recreated services legitimately
+  increments emits no series at all, so freshly-recreated services legitimately
   show "No data" until traffic arrives. Only `rakuten_model_info` is set at
   startup and therefore survives immediately.
 - **`models.dvc` tracks all of `models/` as one output**, so a text retrain
@@ -647,4 +647,4 @@ ever disagree on a version — a subset is only trustworthy if it cannot drift.
 - **Fixed-weight fusion is optimal on average, not per product.** Observed: a
   jacuzzi where image said `2583` at 0.9999 and text said `2583` at 0.309 fused
   to 0.413. Confidence-aware weighting might beat it, but it would have to be
-  measured on val the same way — not assumed.
+  measured on val the same way, not assumed.
