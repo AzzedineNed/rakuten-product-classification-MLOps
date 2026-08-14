@@ -1,5 +1,8 @@
 # CPU image - the frozen-backbone pipeline doesn't need a GPU.
-FROM python:3.11-slim
+# 3.12 to match CI and the dev .venv. Until now this served traffic on
+# 3.11 while the suite had only ever run on 3.12, so the interpreter
+# behind the API was the one interpreter nothing tested.
+FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \

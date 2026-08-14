@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 # Rakuten image-classification MLOps pipeline - Python deps
-# Python 3.10/3.11 recommended.
+# Python 3.12 - CI, the dev .venv and the container all run 3.12.
 #
 # IMPORTANT: install PyTorch separately FIRST, because the right wheel depends
 # on your hardware. PyTorch is intentionally NOT pinned below.

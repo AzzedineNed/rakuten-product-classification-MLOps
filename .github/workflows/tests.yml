@@ -22,9 +22,9 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v4
 
-      # 3.12 matches the .venv on the dev machine. requirements.txt says
-      # 3.10/3.11 are "recommended", but the pipeline is developed and run on
-      # 3.12, so that is what CI must prove.
+      # 3.12 everywhere: the dev .venv, this job, and the container since
+      # the Dockerfile moved off 3.11. One interpreter, and it is the one
+      # that serves traffic.
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
