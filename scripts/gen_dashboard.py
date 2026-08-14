@@ -132,7 +132,13 @@ def table(panel_id: int, title: str, description: str, pos: tuple, expr: str,
 
 
 def stat(panel_id: int, title: str, description: str, pos: tuple, expr: str,
-         ref_id: str, legend: str) -> dict:
+         ref_id: str, legend: str, steps: list = None) -> dict:
+    """A single number, coloured by threshold.
+
+    `steps` defaults to "1 is good", which is what an `up`-style query wants.
+    Pass it explicitly for a query that COUNTS BAD THINGS, where 0 is the
+    healthy answer and any non-zero value should be red.
+    """
     x, y, w, h = pos
     return {
         "id": panel_id,
@@ -147,8 +153,8 @@ def stat(panel_id: int, title: str, description: str, pos: tuple, expr: str,
                 "mappings": [],
                 "thresholds": {
                     "mode": "absolute",
-                    "steps": [{"color": "red", "value": None},
-                              {"color": "green", "value": 1}],
+                    "steps": steps or [{"color": "red", "value": None},
+                                       {"color": "green", "value": 1}],
                 },
             },
             "overrides": [],
@@ -168,16 +174,30 @@ def stat(panel_id: int, title: str, description: str, pos: tuple, expr: str,
 def build() -> dict:
     panels = [
         row(1, "Service health", 0),
+        stat(14, "Services on a degraded model",
+             "0 is the healthy answer. Counts services whose SERVED source says "
+             "'unpromoted' (a promotion exists and is not being honoured, or the "
+             "alias lookup failed at boot) or 'not-loaded' (nothing resolved at "
+             "all). Both are fixed by restarting the service once the registry "
+             "answers. This is the condition that hid for two days in August "
+             "2026 while every other panel stayed green. The == 1 is load "
+             "bearing: a source that STOPPED being served lingers as a series "
+             "with value 0, and counting those would make this permanently red.",
+             (0, 1, 6, 4),
+             'count(rakuten_model_info{source=~".*(unpromoted|not-loaded).*"} '
+             "== 1) or vector(0)", "D", "degraded",
+             [{"color": "green", "value": None}, {"color": "red", "value": 1}]),
         stat(2, "Scrape targets up",
              "1 = Prometheus reached the service's /metrics. Says nothing about "
              "whether a model is loaded. See the serving table.",
-             (0, 1, 6, 4),
+             (6, 1, 6, 4),
              'up{job=~"image-api|text-api|gateway"}', "L", "{{job}}"),
         table(3, "Which model is each service serving?",
               "THE answer to 'which model is in production'. Read from the running "
-              "process, not inferred from disk. image stays 'not-loaded' until its "
-              "first real /predict, because the service resolves its model lazily.",
-              (6, 1, 18, 4),
+              "process, not inferred from disk. Both services now resolve at "
+              "startup, so a source of 'not-loaded' here means resolution FAILED, "
+              "not that nobody has sent traffic yet.",
+              (12, 1, 12, 4),
               "rakuten_model_info", "S",
               # `modality` is dropped: it duplicates `service` on every row
               # except the gateway's (fusion vs gateway), and the question this
@@ -335,7 +355,9 @@ def validate(dashboard: dict) -> list[str]:
 
 def render(dashboard: dict) -> str:
     # Matches the committed file exactly: 2-space indent, key order as built,
-    # non-ASCII left alone (the title contains an em dash), trailing newline.
+    # non-ASCII left alone, trailing newline. ensure_ascii=False is kept because
+    # a panel description could legitimately need a non-ASCII character; there
+    # is none in the tree today.
     return json.dumps(dashboard, indent=2, ensure_ascii=False) + "\n"
 
 

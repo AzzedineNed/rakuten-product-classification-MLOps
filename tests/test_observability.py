@@ -11,6 +11,8 @@ counters.
 from __future__ import annotations
 
 import asyncio
+import pathlib
+import sys
 
 import pytest
 
@@ -256,3 +258,54 @@ def test_render_returns_prometheus_text_format():
     assert "rakuten_predictions_total" in text
     assert 'prdtypecode="1180"' in text
     assert "# HELP rakuten_predictions_total" in text
+
+
+# --------------------------------------------------------------------------- #
+# The Grafana dashboard
+#
+# The JSON is generated, and scripts/gen_dashboard.py --check has always been
+# able to prove the committed file matches. Nothing ever RAN it: not the test
+# suite, not CI, only a human remembering to. So the guarantee existed and was
+# unenforced. These tests enforce it, and they cost nothing - no fastapi, no
+# mlflow, so they run in both CI jobs.
+# --------------------------------------------------------------------------- #
+_SCRIPTS = pathlib.Path(__file__).resolve().parents[1] / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+import gen_dashboard  # noqa: E402
+
+
+def test_the_committed_dashboard_matches_the_generator():
+    """A hand edit to the JSON, or a change to the generator that nobody
+    regenerated, both land here instead of in a browser."""
+    committed = gen_dashboard.OUTPUT.read_text(encoding="utf-8")
+    assert gen_dashboard.render(gen_dashboard.build()) == committed
+
+
+def test_the_generated_dashboard_has_no_geometry_problems():
+    """Overlaps, duplicate ids, panels off the grid and instant-vs-range
+    mistakes are all invisible until the dashboard is opened."""
+    assert gen_dashboard.validate(gen_dashboard.build()) == []
+
+
+def test_the_degraded_panel_counts_only_what_is_actually_being_served():
+    """THE TRAP in the degraded-model panel.
+
+    set_model_info sets the previous source's series to 0 rather than deleting
+    it, so a service that RECOVERED still has a 'not-loaded' or 'unpromoted'
+    series sitting at 0. Counting series instead of series-with-value-1 would
+    leave the panel red forever after the first incident, which is worse than
+    not having it: an indicator that is always red gets ignored.
+
+    Verified in the sandbox with promtool 3.0.0 (the pinned Prometheus
+    version) against four synthetic series sets, including the recovery case.
+    """
+    panel = next(p for p in gen_dashboard.build()["panels"]
+                 if p["title"] == "Services on a degraded model")
+    expr = panel["targets"][0]["expr"]
+
+    assert "== 1" in expr
+    assert "or vector(0)" in expr  # 0 rather than "No data" when all is well
+    assert panel["fieldConfig"]["defaults"]["thresholds"]["steps"] == [
+        {"color": "green", "value": None}, {"color": "red", "value": 1}]
