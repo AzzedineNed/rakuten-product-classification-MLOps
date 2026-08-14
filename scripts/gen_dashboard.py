@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""gen_dashboard.py — generate grafana/dashboards/rakuten-overview.json.
+"""gen_dashboard.py: generate grafana/dashboards/rakuten-overview.json.
 
 WHY THIS EXISTS. The dashboard is 560 lines of JSON describing 13 panels laid
 out on Grafana's 24-column grid. Editing that by hand is how you get two panels
 sharing a cell, a panel hanging off the right edge, or a datasource uid that no
-longer matches the provisioned one — none of which any test or CI job can see,
+longer matches the provisioned one, none of which any test or CI job can see,
 because a dashboard is data, not code. Generating it from this script means the
 layout can be ASSERTED (see validate()), and a broken edit fails here instead of
 appearing as an empty panel in a browser three days later.
 
-The generator was written in session 9 and then LOST — it lived only in a
+The generator was written in session 9 and then LOST. It lived only in a
 sandbox and never made it into the repo, which is exactly the failure this file
 now prevents. It has been reconstructed from the committed JSON and is verified
 to reproduce it BYTE FOR BYTE: `python scripts/gen_dashboard.py --check` exits
@@ -22,7 +22,7 @@ Usage:
   python scripts/gen_dashboard.py --check    # verify the file matches, write nothing
   python scripts/gen_dashboard.py --stdout   # print it
 
-AFTER REGENERATING, restart Grafana — it does not reload a bind-mounted
+AFTER REGENERATING, restart Grafana. It does not reload a bind-mounted
 dashboard (wart 15's family):
   sudo docker compose restart grafana
 """
@@ -170,13 +170,13 @@ def build() -> dict:
         row(1, "Service health", 0),
         stat(2, "Scrape targets up",
              "1 = Prometheus reached the service's /metrics. Says nothing about "
-             "whether a model is loaded — see the serving table.",
+             "whether a model is loaded. See the serving table.",
              (0, 1, 6, 4),
              'up{job=~"image-api|text-api|gateway"}', "L", "{{job}}"),
         table(3, "Which model is each service serving?",
               "THE answer to 'which model is in production'. Read from the running "
               "process, not inferred from disk. image stays 'not-loaded' until its "
-              "first real /predict — the service resolves its model lazily.",
+              "first real /predict, because the service resolves its model lazily.",
               (6, 1, 18, 4),
               "rakuten_model_info", "S",
               # `modality` is dropped: it duplicates `service` on every row
@@ -211,7 +211,7 @@ def build() -> dict:
 
         row(8, "Predictions", 14),
         table(9, "Predictions by product type (top 10)",
-              "Cumulative since each service STARTED — these counters are "
+              "Cumulative since each service STARTED. These counters are "
               "in-process and reset when a container is recreated. A single "
               "class dominating is the signal worth watching: the text "
               "model's weak classes (1180, 10, 1280) are where drift would "
@@ -243,7 +243,7 @@ def build() -> dict:
     ]
     return {
         "uid": "rakuten-overview",
-        "title": "Rakuten — services overview",
+        "title": "Rakuten services overview",
         "description": "Request rate, latency, predictions and fusion health for "
                        "the image, text and fusion services.",
         "tags": ["rakuten", "mlops"],
@@ -326,7 +326,7 @@ def validate(dashboard: dict) -> list[str]:
                 problems.append(
                     f"panel {panel['id']} {panel['title']!r} is a {panel['type']} "
                     f"fed by an instant query but format is {target['format']!r}, "
-                    f"not 'table' — it will render 'No data'")
+                    f"not 'table', so it will render 'No data'")
             if not target["expr"].strip():
                 problems.append(f"panel {panel['id']} has an empty expression")
 

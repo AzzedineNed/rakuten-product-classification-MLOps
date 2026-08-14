@@ -1,6 +1,6 @@
 {
   "uid": "rakuten-overview",
-  "title": "Rakuten — services overview",
+  "title": "Rakuten services overview",
   "description": "Request rate, latency, predictions and fusion health for the image, text and fusion services.",
   "tags": [
     "rakuten",
@@ -34,7 +34,7 @@
       "id": 2,
       "type": "stat",
       "title": "Scrape targets up",
-      "description": "1 = Prometheus reached the service's /metrics. Says nothing about whether a model is loaded — see the serving table.",
+      "description": "1 = Prometheus reached the service's /metrics. Says nothing about whether a model is loaded. See the serving table.",
       "datasource": {
         "type": "prometheus",
         "uid": "rakuten-prometheus"
@@ -96,7 +96,7 @@
       "id": 3,
       "type": "table",
       "title": "Which model is each service serving?",
-      "description": "THE answer to 'which model is in production'. Read from the running process, not inferred from disk. image stays 'not-loaded' until its first real /predict — the service resolves its model lazily.",
+      "description": "THE answer to 'which model is in production'. Read from the running process, not inferred from disk. image stays 'not-loaded' until its first real /predict, because the service resolves its model lazily.",
       "datasource": {
         "type": "prometheus",
         "uid": "rakuten-prometheus"
@@ -338,7 +338,7 @@
       "id": 9,
       "type": "table",
       "title": "Predictions by product type (top 10)",
-      "description": "Cumulative since each service STARTED — these counters are in-process and reset when a container is recreated. A single class dominating is the signal worth watching: the text model's weak classes (1180, 10, 1280) are where drift would show first.",
+      "description": "Cumulative since each service STARTED. These counters are in-process and reset when a container is recreated. A single class dominating is the signal worth watching: the text model's weak classes (1180, 10, 1280) are where drift would show first.",
       "datasource": {
         "type": "prometheus",
         "uid": "rakuten-prometheus"
