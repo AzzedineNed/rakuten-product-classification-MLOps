@@ -19,14 +19,19 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # v7 of both actions runs on Node 24. The v4/v5 majors declared Node 20,
+      # which GitHub has deprecated: the runner already forced Node 24 and
+      # warned on every job. No input we use was removed, and checkout v7's
+      # fork-PR restriction only applies to pull_request_target and
+      # workflow_run, neither of which this workflow uses.
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # 3.12 everywhere: the dev .venv, this job, and the container since
       # the Dockerfile moved off 3.11. One interpreter, and it is the one
       # that serves traffic.
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -71,10 +76,10 @@ jobs:
 
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
