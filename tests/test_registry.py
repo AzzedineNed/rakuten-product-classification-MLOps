@@ -40,10 +40,40 @@ class _Version:
         self.version = int(version)
 
 
+class _AliasAbsent(Exception):
+    """What a missing alias looks like on the wire.
+
+    MEASURED on MLflow 3.14.0 against a real registry: MlflowException with
+    error_code 'INVALID_PARAMETER_VALUE' and the message "Registered model
+    alias production not found." The resolver keys off error_code alone, so
+    this fake carries the code rather than importing mlflow, which would make
+    these tests unrunnable in the CI subset (see requirements-ci.txt).
+
+    THIS USED TO BE A BARE RuntimeError. That was fine while every failure took
+    the same path, and became wrong in session 13 when the resolver started
+    retrying failures that are NOT an absence: a bare RuntimeError models an
+    unreachable registry, not a missing alias, so the fake was quietly testing
+    the wrong branch.
+    """
+
+    error_code = "INVALID_PARAMETER_VALUE"
+
+
+class _AliasUnreachable(Exception):
+    """What a timed-out alias lookup looks like on the wire.
+
+    MEASURED: MlflowException with error_code 'INTERNAL_ERROR', because the
+    timeout is constructed client-side in mlflow.utils.rest_utils with no
+    explicit code. This is the case that MUST be retried.
+    """
+
+    error_code = "INTERNAL_ERROR"
+
+
 class FakeClient:
     """Minimal stand-in. Real MLflow raises MlflowException for a missing alias;
-    the resolver catches bare Exception, so the exact type does not matter - but
-    it MUST raise rather than return None, which is what this fake reproduces.
+    the resolver keys off error_code, not the exception type, so this fake
+    reproduces the CODE - and it MUST raise rather than return None.
     """
 
     def __init__(self, versions, aliases=None):
@@ -54,7 +84,7 @@ class FakeClient:
     def get_model_version_by_alias(self, name, alias):
         self.alias_calls.append((name, alias))
         if alias not in self._aliases:
-            raise RuntimeError(f"alias {alias!r} not found on {name!r}")
+            raise _AliasAbsent(f"Registered model alias {alias} not found.")
         return _Version(self._aliases[alias])
 
     def search_model_versions(self, filter_string):
@@ -182,3 +212,153 @@ def test_real_registry_with_no_versions_raises_lookuperror(tmp_path, monkeypatch
     client.create_registered_model("empty")
     with pytest.raises(LookupError):
         registry.resolve_registry_version(client, "empty")
+
+
+# --------------------------------------------------------------------------
+# retrying a transient alias failure (session 13)
+#
+# WHY THIS EXISTS. On 2026-08-14 the image container booted serving unpromoted
+# v7 while the production alias pointed at v2. Nothing was broken: the alias
+# lookup timed out once, the resolver silently downgraded to newest-version,
+# load_from_registry returned successfully, and /health reported a healthy
+# registry load. MEASURED in the same window: 7 of 12 alias calls failed at a
+# 10s ceiling and 4 of 8 at a 60s ceiling, while every success returned in
+# under 0.7s. The cause never reproduced and is recorded as unknown; these
+# tests are about the RESPONSE to a failure, not its cause.
+#
+# time.sleep is patched out in every test here. The delays are real in
+# production and would only make the suite slow.
+# --------------------------------------------------------------------------
+class FlakyAliasClient(FakeClient):
+    """Fails the alias lookup `failures` times, then behaves normally."""
+
+    def __init__(self, versions, aliases=None, failures=0,
+                 exc_factory=_AliasUnreachable):
+        super().__init__(versions, aliases)
+        self._remaining = failures
+        self._exc_factory = exc_factory
+
+    def get_model_version_by_alias(self, name, alias):
+        self.alias_calls.append((name, alias))
+        if self._remaining > 0:
+            self._remaining -= 1
+            raise self._exc_factory("API request failed with timeout exception")
+        if alias not in self._aliases:
+            raise _AliasAbsent(f"Registered model alias {alias} not found.")
+        return _Version(self._aliases[alias])
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    """Record the backoff delays instead of sleeping them."""
+    slept = []
+    monkeypatch.setattr(registry.time, "sleep", slept.append)
+    return slept
+
+
+def test_a_transient_alias_failure_is_retried_and_the_promotion_is_honoured(no_sleep):
+    """The bug this whole section exists for: one blip must not silently
+    change which model serves."""
+    client = FlakyAliasClient(versions=[1, 2, 7], aliases={"production": 2},
+                              failures=1)
+    version, source = registry.resolve_registry_version(client, "m")
+    assert str(version.version) == "2"
+    assert source == "registry:m@production/v2"
+    assert len(client.alias_calls) == 2
+
+
+def test_retries_continue_up_to_the_attempt_budget(no_sleep):
+    client = FlakyAliasClient(versions=[1, 2], aliases={"production": 1},
+                              failures=registry.ALIAS_LOOKUP_ATTEMPTS - 1)
+    version, source = registry.resolve_registry_version(client, "m")
+    assert str(version.version) == "1"
+    assert source == "registry:m@production/v1"
+    assert len(client.alias_calls) == registry.ALIAS_LOOKUP_ATTEMPTS
+
+
+def test_exhausting_the_budget_falls_back_but_says_so(no_sleep):
+    """The fallback is unchanged - serving must not stop - but the source
+    string has to distinguish this from an alias nobody ever set."""
+    client = FlakyAliasClient(versions=[1, 2, 7], aliases={"production": 2},
+                              failures=99)
+    version, source = registry.resolve_registry_version(client, "m")
+    assert str(version.version) == "7"
+    assert "alias lookup failed" in source
+    assert len(client.alias_calls) == registry.ALIAS_LOOKUP_ATTEMPTS
+
+
+def test_the_two_fallback_reasons_produce_different_strings(no_sleep):
+    """An operator reading /health must be able to tell 'nothing was ever
+    promoted' from 'a promotion exists and is not being honoured'."""
+    absent = FakeClient(versions=[1, 2])
+    _, absent_source = registry.resolve_registry_version(absent, "m")
+
+    broken = FlakyAliasClient(versions=[1, 2], aliases={"production": 1},
+                              failures=99)
+    _, broken_source = registry.resolve_registry_version(broken, "m")
+
+    assert absent_source != broken_source
+    assert "alias lookup failed" not in absent_source
+    assert "alias lookup failed" in broken_source
+
+
+def test_an_absent_alias_is_not_retried(no_sleep):
+    """Retrying a definite answer only makes a fresh registry slower. This is
+    the asymmetry the whole design rests on, so it is asserted, not assumed."""
+    client = FakeClient(versions=[1, 2])
+    registry.resolve_registry_version(client, "m")
+    assert len(client.alias_calls) == 1
+    assert no_sleep == []
+
+
+@pytest.mark.parametrize("code", sorted(registry.ALIAS_ABSENT_ERROR_CODES))
+def test_every_absent_error_code_short_circuits(no_sleep, code):
+    exc_type = type("_Absent", (Exception,), {"error_code": code})
+    client = FlakyAliasClient(versions=[1, 2], failures=99, exc_factory=exc_type)
+    _, source = registry.resolve_registry_version(client, "m")
+    assert len(client.alias_calls) == 1
+    assert "alias lookup failed" not in source
+
+
+def test_an_exception_with_no_error_code_is_retried(no_sleep):
+    """The safe default. An unrecognised client (older MLflow, a raw requests
+    exception, a test double) must not be mistaken for a definite absence -
+    that would lose a promotion silently, which is the original bug."""
+    client = FlakyAliasClient(versions=[1, 2], aliases={"production": 1},
+                              failures=1, exc_factory=RuntimeError)
+    version, source = registry.resolve_registry_version(client, "m")
+    assert str(version.version) == "1"
+    assert source == "registry:m@production/v1"
+    assert len(client.alias_calls) == 2
+
+
+def test_backoff_delays_are_applied_in_order(no_sleep):
+    client = FlakyAliasClient(versions=[1], aliases={"production": 1},
+                              failures=registry.ALIAS_LOOKUP_ATTEMPTS - 1)
+    registry.resolve_registry_version(client, "m")
+    expected = list(registry.ALIAS_RETRY_DELAYS[:registry.ALIAS_LOOKUP_ATTEMPTS - 1])
+    assert no_sleep == expected
+
+
+def test_no_sleep_after_the_final_attempt(no_sleep):
+    """A budget of N attempts costs N-1 waits, not N. Sleeping after the last
+    failure would add dead time to every degraded startup."""
+    client = FlakyAliasClient(versions=[1], failures=99,
+                              exc_factory=_AliasUnreachable)
+    registry.resolve_registry_version(client, "m")
+    assert len(no_sleep) == registry.ALIAS_LOOKUP_ATTEMPTS - 1
+
+
+def test_there_are_enough_delays_for_the_attempt_budget():
+    """A config guard, not a behaviour test: raising ALIAS_LOOKUP_ATTEMPTS
+    without adding a delay would IndexError on the retry path, which is the
+    path that only runs when something is already wrong."""
+    assert len(registry.ALIAS_RETRY_DELAYS) >= registry.ALIAS_LOOKUP_ATTEMPTS - 1
+
+
+def test_a_failed_lookup_still_raises_lookuperror_when_there_is_nothing_to_serve(no_sleep):
+    """Exhausted retries must not invent a version. The caller falls back to
+    the local artifact on LookupError; swallowing it would serve nothing."""
+    client = FlakyAliasClient(versions=[], failures=99)
+    with pytest.raises(LookupError):
+        registry.resolve_registry_version(client, "m")
