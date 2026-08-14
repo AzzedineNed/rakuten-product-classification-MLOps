@@ -137,3 +137,192 @@ def test_actor_falls_back_to_the_os_user(tmp_path, monkeypatch):
     monkeypatch.delenv("RAKUTEN_PROMOTED_BY", raising=False)
     assert promote_script._actor()
     assert promote_script._actor() != ""
+
+
+# ---------------------------------------------------------------------------
+# "UNSET" AND "COULD NOT READ" ARE NOT THE SAME ANSWER
+#
+# The old helper caught every exception and returned None, so a registry that
+# did not answer looked exactly like a registry where nothing was promoted.
+# The serving path got this fixed in 8e50577; this is the same bug in the tool
+# an operator reaches for when something already looks wrong. It is worse here
+# than a misleading line of output, because promote() uses the answer to decide
+# what to stamp on the version that LOSES the alias, and MLflow keeps no
+# history to rebuild that from.
+#
+# The error codes below were MEASURED on MLflow 3.14.0 (see the module
+# docstring of rakuten_common.registry); the resolver keys off error_code
+# alone, so a plain Exception carrying the right code is a faithful stand-in.
+# ---------------------------------------------------------------------------
+
+
+class _AliasUnreachable(Exception):
+    """A request that never completed. MEASURED: error_code INTERNAL_ERROR,
+    because MLflow builds the timeout client-side with no explicit code."""
+    error_code = "INTERNAL_ERROR"
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    """Record the backoff delays instead of sleeping them."""
+    slept = []
+    monkeypatch.setattr(promote_script.time, "sleep", slept.append)
+    return slept
+
+
+def _alias_truth(client, name, alias="production"):
+    """What the registry ACTUALLY holds, read through a fresh client so the
+    assertion cannot be answered by whatever the test has patched."""
+    from mlflow import MlflowClient
+    try:
+        return str(MlflowClient().get_model_version_by_alias(name, alias).version)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _break_alias_reads(client, monkeypatch, failures=99):
+    """Make the next `failures` alias reads fail as an unreachable registry.
+
+    Wraps the real client, so everything else in the promotion path still runs
+    against the real SQLite backend. Returns the call counter.
+    """
+    real = client.get_model_version_by_alias
+    calls = []
+
+    def _flaky(name, alias):
+        calls.append(alias)
+        if len(calls) <= failures:
+            raise _AliasUnreachable("HTTPSConnectionPool: read timed out")
+        return real(name, alias)
+
+    monkeypatch.setattr(client, "get_model_version_by_alias", _flaky)
+    return calls
+
+
+@pytest.mark.slow
+def test_an_absent_alias_is_answered_in_one_call_by_a_real_registry(
+        tmp_path, monkeypatch, no_sleep):
+    """Guards the half of the rule that costs nothing: MLflow's own "not found"
+    must be recognised as an absence, not retried. If this regresses, every
+    first promotion pays the full retry budget for an answer it already had."""
+    client, name, _ = _registry(tmp_path, monkeypatch, n_versions=1)
+    calls = []
+    real = client.get_model_version_by_alias
+    monkeypatch.setattr(client, "get_model_version_by_alias",
+                        lambda n, a: (calls.append(a), real(n, a))[1])
+
+    assert promote_script._alias_state(client, name, "production") == (None, "absent")
+    assert len(calls) == 1
+    assert no_sleep == []
+
+
+@pytest.mark.slow
+def test_a_transient_read_does_not_cost_the_outgoing_version_its_record(
+        tmp_path, monkeypatch, no_sleep):
+    """THE BUG THIS COMMIT EXISTS FOR. One blip while reading the alias used to
+    make promote() believe nothing was promoted: the new version got
+    promoted_from=none and the version actually losing the alias got no
+    demotion stamp at all, silently and permanently."""
+    client, name, versions = _registry(tmp_path, monkeypatch)
+    monkeypatch.setenv("RAKUTEN_PROMOTED_BY", "dave")
+    promote_script.promote(client, name, "production", versions[0])
+
+    _break_alias_reads(client, monkeypatch, failures=1)
+    promote_script.promote(client, name, "production", versions[1])
+
+    old, new = _tags(client, name, versions[0]), _tags(client, name, versions[1])
+    assert new["promoted_from"] == f"v{versions[0]}"
+    assert old["demoted_to"] == f"v{versions[1]}"
+    assert no_sleep == [promote_script.ALIAS_RETRY_DELAYS[0]]
+
+
+@pytest.mark.slow
+def test_promote_refuses_to_move_an_alias_it_cannot_read(
+        tmp_path, monkeypatch, no_sleep):
+    """Moving it would probably succeed, which is the problem: the outgoing
+    version could never be named, so its demotion could never be recorded."""
+    client, name, versions = _registry(tmp_path, monkeypatch)
+    promote_script.promote(client, name, "production", versions[0])
+    calls = _break_alias_reads(client, monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        promote_script.promote(client, name, "production", versions[1])
+
+    assert "Refusing to move" in str(exc.value)
+    assert len(calls) == promote_script.ALIAS_LOOKUP_ATTEMPTS
+    # one delay BETWEEN each pair of attempts, and none after the last
+    assert no_sleep == list(
+        promote_script.ALIAS_RETRY_DELAYS[:promote_script.ALIAS_LOOKUP_ATTEMPTS - 1])
+    # and the promotion that was already in force is untouched
+    assert _alias_truth(client, name) == versions[0]
+    assert "demoted_at" not in _tags(client, name, versions[0])
+
+
+@pytest.mark.slow
+def test_a_failed_readback_is_not_reported_as_a_failed_move(
+        tmp_path, monkeypatch, no_sleep, capsys):
+    """The readback catches a write that silently did not land. When the
+    readback itself cannot complete it knows nothing, so it must not claim the
+    move failed - and above all must not exit before the tags are written,
+    which would leave the exact hole this commit closes."""
+    client, name, versions = _registry(tmp_path, monkeypatch, n_versions=1)
+    real = client.get_model_version_by_alias
+    calls = []
+
+    def _fails_only_after_the_write(n, a):
+        # Call 1 is the "what is promoted now" lookup, call 2 is the readback.
+        calls.append(a)
+        if len(calls) > 1:
+            raise _AliasUnreachable("HTTPSConnectionPool: read timed out")
+        return real(n, a)
+
+    monkeypatch.setattr(client, "get_model_version_by_alias",
+                        _fails_only_after_the_write)
+    promote_script.promote(client, name, "production", versions[0])  # must not raise
+
+    assert "most likely succeeded" in capsys.readouterr().out
+    assert _tags(client, name, versions[0])["promoted_by"]
+
+
+@pytest.mark.slow
+def test_demote_refuses_when_it_cannot_name_the_version_losing_the_alias(
+        tmp_path, monkeypatch, no_sleep):
+    client, name, versions = _registry(tmp_path, monkeypatch, n_versions=1)
+    promote_script.promote(client, name, "production", versions[0])
+    _break_alias_reads(client, monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        promote_script.demote(client, name, "production")
+
+    assert "Refusing to remove" in str(exc.value)
+    assert _alias_truth(client, name) == versions[0]
+
+
+@pytest.mark.slow
+def test_list_says_unset_only_when_the_registry_said_so(
+        tmp_path, monkeypatch, capsys):
+    client, name, _ = _registry(tmp_path, monkeypatch, n_versions=1)
+    promote_script.list_versions(client, name, "production")
+    out = capsys.readouterr().out
+    assert "(unset)" in out
+    assert "SERVING" not in out
+
+
+@pytest.mark.slow
+def test_list_does_not_call_an_unreadable_alias_unset(
+        tmp_path, monkeypatch, no_sleep, capsys):
+    """An operator reading this is usually already suspicious. Reporting
+    "(unset)" here points them at the wrong problem entirely."""
+    client, name, versions = _registry(tmp_path, monkeypatch, n_versions=1)
+    promote_script.promote(client, name, "production", versions[0])
+    _break_alias_reads(client, monkeypatch)
+    capsys.readouterr()
+
+    promote_script.list_versions(client, name, "production")
+
+    out = capsys.readouterr().out
+    assert "(unset)" not in out
+    assert "UNKNOWN" in out
+    assert "Re-run when the registry answers" in out
+    # v1 really is serving, but this run has no right to say so
+    assert "<-- SERVING" not in out

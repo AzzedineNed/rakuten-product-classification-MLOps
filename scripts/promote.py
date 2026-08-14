@@ -24,10 +24,16 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 
 import _bootstrap  # noqa: F401
 
 from rakuten_img import config
+from rakuten_common.registry import (
+    ALIAS_LOOKUP_ATTEMPTS,
+    ALIAS_RETRY_DELAYS,
+    _alias_is_absent,
+)
 
 
 def _client():
@@ -37,12 +43,44 @@ def _client():
     return MlflowClient()
 
 
-def _current_alias_version(client, name: str, alias: str):
-    """Version string currently carrying `alias`, or None if unset/unsupported."""
-    try:
-        return client.get_model_version_by_alias(name, alias).version
-    except Exception:  # noqa: BLE001
-        return None
+def _alias_state(client, name: str, alias: str):
+    """Which version carries `alias`, and whether we actually know.
+
+    Returns (version, "resolved"), (None, "absent") or (None, "failed").
+
+    THE THREE-STATE ANSWER IS THE POINT. The helper this replaces caught every
+    exception and returned None, so "nobody has promoted anything" and "the
+    registry did not answer" came back identical. That is how the image alias
+    read as unset for three round trips in session 13 while it was in fact on
+    v2 the whole time, and it is the same bug that 8e50577 fixed in the serving
+    path. Here it is worse than a wrong line of output: promote() uses the
+    answer to decide what to stamp on the OUTGOING version, and MLflow keeps no
+    history to rebuild that from afterwards.
+
+    The classification rule and the retry budget are imported rather than
+    restated. Both were measured (see rakuten_common.registry), and a second
+    copy of a measured constant is a copy that goes stale. The loop is local
+    because the messages have to differ: this script is not serving traffic and
+    nothing here falls back to a newest version.
+    """
+    last_exc: BaseException | None = None
+    for attempt in range(1, ALIAS_LOOKUP_ATTEMPTS + 1):
+        try:
+            return client.get_model_version_by_alias(name, alias).version, "resolved"
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if _alias_is_absent(exc):
+                return None, "absent"
+            if attempt < ALIAS_LOOKUP_ATTEMPTS:
+                delay = ALIAS_RETRY_DELAYS[attempt - 1]
+                print(f"⚠️  Reading alias '{alias}' failed (attempt "
+                      f"{attempt}/{ALIAS_LOOKUP_ATTEMPTS}, "
+                      f"{type(exc).__name__}: {exc}) - retrying in {delay}s.")
+                time.sleep(delay)
+    print(f"❌ Could not read alias '{alias}' on '{name}' after "
+          f"{ALIAS_LOOKUP_ATTEMPTS} attempts "
+          f"({type(last_exc).__name__}: {last_exc}).")
+    return None, "failed"
 
 
 def list_versions(client, name: str, alias: str) -> None:
@@ -51,13 +89,22 @@ def list_versions(client, name: str, alias: str) -> None:
     if not versions:
         print(f"(no versions of '{name}' registered yet)")
         return
-    promoted = _current_alias_version(client, name, alias)
-    print(f"Registered model: {name}   alias '{alias}' -> "
-          f"{'v' + promoted if promoted else '(unset)'}\n")
+    promoted, outcome = _alias_state(client, name, alias)
+    current = {"resolved": f"v{promoted}",
+               "absent": "(unset)"}.get(outcome, "(UNKNOWN - see above)")
+    print(f"Registered model: {name}   alias '{alias}' -> {current}\n")
     for v in versions:
-        marker = "  <-- SERVING" if str(v.version) == str(promoted) else ""
+        serving = outcome == "resolved" and str(v.version) == str(promoted)
+        marker = "  <-- SERVING" if serving else ""
         tags = ", ".join(f"{k}={val}" for k, val in sorted(v.tags.items())) or "-"
         print(f"  v{v.version}  run={str(v.run_id)[:8]}  {tags}{marker}")
+    if outcome == "failed":
+        # Without this the listing looks exactly like a registry where nothing
+        # has ever been promoted, which is the reading that cost session 13
+        # three round trips.
+        print(f"\n⚠️  Nothing is marked SERVING because the alias could not be "
+              f"READ, not because nothing is promoted. Re-run when the "
+              f"registry answers.")
 
 
 def _actor() -> str:
@@ -118,17 +165,32 @@ def promote(client, name: str, alias: str, version: str) -> None:
     else:
         print(f"⚠️  v{version} has no run_id - skipping the artifact check.")
 
-    previous = _current_alias_version(client, name, alias)
+    previous, outcome = _alias_state(client, name, alias)
+    if outcome == "failed":
+        # Moving it anyway would very likely SUCCEED, and that is the problem:
+        # the outgoing version could not be named, so its demotion could never
+        # be stamped, and MLflow keeps no history to recover the answer from.
+        # A promotion is cheap to repeat and a hole in the audit trail is
+        # permanent, so this refuses before touching anything.
+        sys.exit(f"❌ Refusing to move '{alias}': the registry would not say "
+                 f"which version holds it. Re-run when it answers.")
     client.set_registered_model_alias(name, alias, version)
     # Read back rather than trusting the write: an alias that silently did not
     # move would mean serving stays on the old model while we believe otherwise.
-    now = _current_alias_version(client, name, alias)
+    now, readback = _alias_state(client, name, alias)
     # str() on BOTH sides: MLflow 3.14.0 returns ModelVersion.version as an int
     # against a local backend, while DagsHub's REST layer returns a string. A
     # bare `!=` therefore aborts here AFTER the alias has already moved,
     # telling the operator the promotion failed when it succeeded. Caught by
     # tests/test_promote.py running against a real local registry.
-    if str(now) != str(version):
+    if readback == "failed":
+        # The write did not raise, so it most likely landed. Exiting here would
+        # skip the tags below and leave exactly the hole this commit is about,
+        # so say what is and is not known and carry on.
+        print(f"⚠️  Could not read '{alias}' back after moving it. The write "
+              f"did not raise, so it most likely succeeded - confirm with "
+              f"--list once the registry answers.")
+    elif str(now) != str(version):
         sys.exit(f"❌ Alias did not move (reads back as {now!r}).")
     moved = f"v{previous} -> v{version}" if previous else f"-> v{version}"
     print(f"🏷️  '{alias}' {moved} on '{name}'.")
@@ -157,7 +219,12 @@ def promote(client, name: str, alias: str, version: str) -> None:
 
 
 def demote(client, name: str, alias: str) -> None:
-    losing = _current_alias_version(client, name, alias)
+    losing, outcome = _alias_state(client, name, alias)
+    if outcome == "failed":
+        # Same reasoning as promote(): the deletion could not be recorded on
+        # the version that loses the alias, and nothing else records it either.
+        sys.exit(f"❌ Refusing to remove '{alias}': the registry would not say "
+                 f"which version holds it. Re-run when it answers.")
     if losing is None:
         sys.exit(f"❌ Alias '{alias}' is not set on '{name}'.")
     client.delete_registered_model_alias(name, alias)
