@@ -1,4 +1,4 @@
-# Airflow orchestration stack — SEPARATE from docker-compose.yml on purpose.
+# Airflow orchestration stack - SEPARATE from docker-compose.yml on purpose.
 #
 # Why a second compose file rather than more services in the first one:
 #   The serving stack (api + nginx) must outlive the orchestrator. Resetting a
@@ -9,7 +9,7 @@
 #
 # How Airflow reaches the API:
 #   As an ordinary external HTTP client, through nginx on the host's :80, with
-#   basic auth — exactly like any other caller. No docker.sock, no privileged
+#   basic auth - exactly like any other caller. No docker.sock, no privileged
 #   access to the serving stack's private network, no second way in to secure.
 #   host.docker.internal is mapped via host-gateway (verified working on this
 #   machine: a container reached http://host.docker.internal/health -> 200).
@@ -19,7 +19,7 @@
 #   because  LocalExecutor runs tasks in the scheduler (no broker, no worker),
 #            and no DAG here uses deferrable operators (no triggerer).
 #   kept     postgres, airflow-init, airflow-apiserver, airflow-scheduler,
-#            airflow-dag-processor — the minimum a working Airflow 3 needs.
+#            airflow-dag-processor - the minimum a working Airflow 3 needs.
 #
 # Usage (from the repo root, serving stack already up):
 #   docker compose -f docker-compose.airflow.yml up airflow-init   # once
@@ -33,7 +33,7 @@
 
 # Explicit project name. WITHOUT this, Compose derives the project from the
 # directory name, so this file would run inside the SAME project as
-# docker-compose.yml — sharing its network, and worse, making `api` and `nginx`
+# docker-compose.yml - sharing its network, and worse, making `api` and `nginx`
 # look like orphans to any `-f docker-compose.airflow.yml down --remove-orphans`,
 # which would delete them. A distinct project is what actually gives the two
 # stacks separate lifecycles; the separate file alone does not.
@@ -50,7 +50,7 @@ x-airflow-common: &airflow-common
 
   environment: &airflow-common-env
     # LocalExecutor: tasks run as subprocesses of the scheduler. Right choice
-    # here — the DAG is strictly sequential, and Celery would add a broker plus
+    # here - the DAG is strictly sequential, and Celery would add a broker plus
     # a worker container against a 4.807 GiB total Docker ceiling.
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
@@ -108,7 +108,7 @@ services:
       retries: 5
       start_period: 5s
     restart: unless-stopped
-    # PROVISIONAL — see the note at the bottom of this file.
+    # PROVISIONAL - see the note at the bottom of this file.
     mem_limit: 512m
 
   # Runs once: DB migration + admin user creation, then exits 0.
@@ -173,7 +173,7 @@ services:
       airflow-init:
         condition: service_completed_successfully
     # Under LocalExecutor the DAG's tasks run HERE. They only make HTTP calls
-    # and stat() a few paths, so this stays small — the heavy lifting happens
+    # and stat() a few paths, so this stays small - the heavy lifting happens
     # in the api container, which has its own 2.5g limit.
     mem_limit: 1g
 
@@ -199,7 +199,7 @@ volumes:
 
 # MEMORY LIMITS ABOVE ARE PROVISIONAL, NOT MEASURED.
 # Every other limit in this repo came from `docker stats` on the target machine.
-# These did not — this stack has never been run here. They are starting caps
+# These did not - this stack has never been run here. They are starting caps
 # chosen to be generous enough not to OOM during first boot, and they MUST be
 # re-measured and tightened before this is treated as settled. Note the totals:
 # limits are caps, not reservations, so the sum exceeding the 4.807 GiB Docker

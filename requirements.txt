@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Rakuten image-classification MLOps pipeline — Python deps
+# Rakuten image-classification MLOps pipeline - Python deps
 # Python 3.10/3.11 recommended.
 #
 # IMPORTANT: install PyTorch separately FIRST, because the right wheel depends
@@ -30,7 +30,7 @@ scikit-learn==1.4.2
 # This is a REPRODUCIBILITY pin, not a breakage guard. scipy deprecates the
 # disp/iprint options that scikit-learn 1.4.2 passes to L-BFGS-B, but unknown
 # solver options only produce OptimizeWarning and the fit still succeeds
-# (measured) — removal will not turn the suite red.
+# (measured) - removal will not turn the suite red.
 scipy==1.17.1
 joblib==1.4.2
 tqdm==4.66.4
@@ -45,7 +45,7 @@ python-multipart==0.0.9
 
 # Dev / tests
 pytest==8.2.0
-# fastapi's TestClient transport, used by tests/test_text_api.py. Test-only —
+# fastapi's TestClient transport, used by tests/test_text_api.py. Test-only,
 # the running services never import it. Pinned because requirements-ci.txt
 # installs it and check_ci_pins.py requires every CI pin to exist here.
 httpx==0.28.1

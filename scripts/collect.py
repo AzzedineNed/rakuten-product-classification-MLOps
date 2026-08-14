@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""collect.py — Data acquisition.
+"""collect.py - Data acquisition.
 
 Single responsibility: get the raw Rakuten data from a configured source into
 data/raw/ in the canonical layout, idempotently, with verification and an audit
@@ -225,7 +225,7 @@ def main() -> dict:
     args = ap.parse_args()
 
     if is_present() and not args.force:
-        print("✅ Raw data already present — skipping (use --force to re-acquire).")
+        print("✅ Raw data already present - skipping (use --force to re-acquire).")
         counts = verify()
         if not config.MANIFEST_PATH.exists():
             return write_manifest({"source": "pre-existing"}, counts)

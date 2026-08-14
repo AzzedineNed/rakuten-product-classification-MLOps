@@ -3,7 +3,7 @@
 
 WHY THIS IS PURE ASGI AND IMPORTS NO FASTAPI
     requirements-ci.txt deliberately omits fastapi, so a test that imports
-    `api/` skips in BOTH CI jobs — it would disappear from CI without a sound,
+    `api/` skips in BOTH CI jobs - it would disappear from CI without a sound,
     which is the exact failure the second CI job exists to prevent. Keeping the
     middleware at the ASGI level (scope / receive / send) means its tests need
     nothing but prometheus-client, so one line in requirements-ci.txt buys real
@@ -80,7 +80,7 @@ def route_template(scope: Scope) -> str:
     VERIFIED against starlette 0.37.2: scope["route"] is absent when the
     middleware is entered and is populated by the router only after the
     downstream app has been awaited, so this must be called AFTER the await.
-    For a request that matched no route it is never set at all — hence the
+    For a request that matched no route it is never set at all - hence the
     constant fallback rather than scope["path"].
     """
     route = scope.get("route")
@@ -96,7 +96,7 @@ class ServiceMetrics:
     Instantiated once per process. Tests pass their own CollectorRegistry so
     each test is isolated; passing None uses the global default registry, which
     also carries prometheus-client's built-in process and GC collectors
-    (process_resident_memory_bytes among them — directly useful for checking
+    (process_resident_memory_bytes among them - directly useful for checking
     the compose mem_limit values against reality).
     """
 
@@ -236,7 +236,7 @@ class PrometheusMiddleware:
         finally:
             # VERIFIED against starlette 0.37.2: when a route handler raises,
             # the exception propagates THROUGH this middleware with no
-            # http.response.start ever sent — ServerErrorMiddleware sits above
+            # http.response.start ever sent - ServerErrorMiddleware sits above
             # us and turns it into the 500 the client sees. Recording only on a
             # clean return would therefore make every 500 invisible, which is
             # precisely the thing a dashboard exists to show. Hence: finally,

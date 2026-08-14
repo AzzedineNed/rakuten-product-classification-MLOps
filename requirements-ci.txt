@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# CI test dependencies — a deliberate SUBSET of requirements.txt.
+# CI test dependencies - a deliberate SUBSET of requirements.txt.
 #
 # The suite is torch-free, mlflow-free and data-free: every import of
 # torch / mlflow / requests / tqdm / dotenv inside src/ is lazy (inside a
@@ -9,7 +9,7 @@
 # Omitted on purpose (installed by requirements.txt, never touched by tests):
 #   mlflow, dagshub, dvc, dvc-http     -> tracking & data versioning
 #
-# THE API LAYER IS NOW INSTALLED HERE, and this is a reversal — it used to be
+# THE API LAYER IS NOW INSTALLED HERE, and this is a reversal - it used to be
 # omitted with the note "no test imports api/". That was true and it was the
 # problem: api/image_main.py, api/text_main.py and api/gateway_main.py were the
 # only untested code in the project, and they are the part that serves traffic.
@@ -61,10 +61,10 @@ matplotlib==3.8.4
 requests==2.31.0
 python-dotenv==1.0.1
 
-# Observability — see the note above; needed by tests/test_observability.py.
+# Observability - see the note above; needed by tests/test_observability.py.
 prometheus-client==0.26.0
 
-# The API layer — needed because tests/test_text_api.py imports
+# The API layer - needed because tests/test_text_api.py imports
 # api.text_main. httpx is fastapi's TestClient transport; it is a test-only
 # dependency and is pinned in requirements.txt alongside pytest.
 fastapi==0.111.0

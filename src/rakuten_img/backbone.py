@@ -4,8 +4,8 @@ This is the only module that imports torch, and it's loaded lazily so the rest
 of the package (config, images, data, classifier, fusion) and the unit tests
 never need torch installed.
 
-The backbone is used in exactly two places — process.py (to cache features for
-the whole dataset) and predict.py / the API (for live inference) — and both go
+The backbone is used in exactly two places - process.py (to cache features for
+the whole dataset) and predict.py / the API (for live inference) - and both go
 through extract_features() / extract_one(), guaranteeing identical preprocessing
 on the training and serving paths.
 """

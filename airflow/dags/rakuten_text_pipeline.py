@@ -1,4 +1,4 @@
-"""Rakuten text pipeline — end-to-end training orchestration for the TEXT model.
+"""Rakuten text pipeline - end-to-end training orchestration for the TEXT model.
 
     data_guard --> train --> evaluate
 
@@ -28,13 +28,13 @@ THE HELPERS BELOW ARE DUPLICATED FROM rakuten_image_pipeline ON PURPOSE.
     1015-second pipeline: sharing code would mean editing it, and re-proving it
     costs a full run. Airflow's safe-mode discovery also scans every .py in
     dags/ for a DAG, so a helper module there is parsed and found wanting on
-    every refresh. IF A THIRD MODALITY APPEARS, EXTRACT THEM THEN — two copies
+    every refresh. IF A THIRD MODALITY APPEARS, EXTRACT THEM THEN - two copies
     is a judgement call, three is a mistake.
 
 CONCURRENCY, THE ONE THING max_active_runs DOES NOT COVER:
     The API's 409 guard is per service. It stops text-train colliding with
     text-evaluate, but nothing stops an image retrain and a text retrain running
-    at the same time — different containers, different DAGs. Measured peaks are
+    at the same time - different containers, different DAGs. Measured peaks are
     1.48 GiB (image) and 841.8 MiB (text) against 4.807 GiB of RAM, so it fits,
     but on two cores they will crawl. Trigger them one at a time.
 
@@ -55,7 +55,7 @@ from airflow.exceptions import AirflowException
 from airflow.providers.standard.operators.python import PythonOperator
 
 # --------------------------------------------------------------------------- #
-# Configuration — all from the environment (airflow/.env.airflow)
+# Configuration - all from the environment (airflow/.env.airflow)
 # --------------------------------------------------------------------------- #
 API_BASE = os.getenv("RAKUTEN_API_BASE_URL", "http://host.docker.internal").rstrip("/")
 API_USER = os.getenv("RAKUTEN_API_USER", "admin")
@@ -68,7 +68,7 @@ TEXT_PREFIX = os.getenv("RAKUTEN_TEXT_PREFIX", "/text")
 DATA_MOUNT = Path(os.getenv("RAKUTEN_DATA_MOUNT", "/opt/airflow/rakuten-data"))
 RAW_DIR = DATA_MOUNT / "raw"
 
-# Text training reads the raw CSVs directly — there is no cached-feature stage,
+# Text training reads the raw CSVs directly - there is no cached-feature stage,
 # which is why this DAG has one guard where the image DAG has two.
 X_TRAIN_CSV = RAW_DIR / "X_train_update.csv"
 Y_TRAIN_CSV = RAW_DIR / "Y_train_CVw08PX.csv"
@@ -111,13 +111,13 @@ def _post(path: str, params: dict | None = None) -> dict:
         raise AirflowException(
             f"404 from {url}: the route does not exist. The text training routes "
             f"live behind {TEXT_PREFIX}/ and were added in the same commit as the "
-            f"endpoints — check that nginx has the current nginx/default.conf "
+            f"endpoints - check that nginx has the current nginx/default.conf "
             f"(it does NOT reload a bind-mounted config; restart it)."
         )
     if resp.status_code == 409:
         raise AirflowException(
             f"409 from {url}: {resp.text}. /train and /evaluate are mutually "
-            f"exclusive — another job is already running on the text API."
+            f"exclusive - another job is already running on the text API."
         )
     if resp.status_code >= 400:
         raise AirflowException(f"{resp.status_code} from {url}: {resp.text}")
@@ -155,7 +155,7 @@ def _poll(status_path: str, timeout_s: int, label: str) -> dict:
             # Either the job never started, or the container restarted mid-run:
             # the status dicts are in-memory and reset to "idle" on boot.
             raise AirflowException(
-                f"{label} reported 'idle' while being polled — the job did not run, "
+                f"{label} reported 'idle' while being polled - the job did not run, "
                 f"or the text-api container restarted while it was running. Check "
                 f"`docker compose logs text-api`."
             )
@@ -173,7 +173,7 @@ def _poll(status_path: str, timeout_s: int, label: str) -> dict:
 def data_guard(**_) -> bool:
     """Are the raw CSVs the text model trains on present?
 
-    Text training needs only the two raw CSVs — the designation/description
+    Text training needs only the two raw CSVs - the designation/description
     text and the labels. It never touches the images, so this DAG can run on a
     machine where the 2.2 GB of image data was never downloaded.
     """
@@ -187,7 +187,7 @@ def data_guard(**_) -> bool:
         raise AirflowException(
             f"The raw text CSVs are not in {RAW_DIR}, so there is nothing to "
             f"train on. Run `dvc pull` (or `python scripts/collect.py`) on the "
-            f"host first — this DAG will not download the dataset for you."
+            f"host first - this DAG will not download the dataset for you."
         )
 
     print("Raw text data present. Note that training re-reads and re-splits it; "
@@ -210,7 +210,7 @@ def train(**_) -> dict:
 
 
 def evaluate(ti=None, **_) -> dict:
-    """POST /text/evaluate, poll, and report — without promoting anything."""
+    """POST /text/evaluate, poll, and report - without promoting anything."""
     print(f"Starting text evaluation against {API_BASE}{TEXT_PREFIX}")
     started = _post(f"{TEXT_PREFIX}/evaluate")
     print(f"API accepted the job: {started}")
@@ -220,7 +220,7 @@ def evaluate(ti=None, **_) -> dict:
 
     train_metrics = ti.xcom_pull(task_ids="train") or {}
     print("=" * 70)
-    print("RUN COMPLETE — a new text model version was registered and NOT promoted.")
+    print("RUN COMPLETE - a new text model version was registered and NOT promoted.")
     print(f"  train/val metrics : {train_metrics}")
     print(f"  test metrics      : {metrics}")
     print("")

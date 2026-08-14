@@ -127,7 +127,7 @@ def entrainer(args):
         "n_val": int(X_val.shape[0]),
         "training_time_sec": round(duree, 1),
     }
-    logger.info("Validation → accuracy=%.4f | f1_weighted=%.4f | f1_macro=%.4f",
+    logger.info("Validation -> accuracy=%.4f | f1_weighted=%.4f | f1_macro=%.4f",
                 metrics["accuracy"], metrics["f1_weighted"], metrics["f1_macro"])
 
     # --- save ----------------------------------------------------------
@@ -182,7 +182,7 @@ def entrainer(args):
         },
     )
 
-    logger.info("Entraînement terminé. Le test set n'a PAS été touché ici — "
+    logger.info("Entraînement terminé. Le test set n'a PAS été touché ici - "
                 "utilisez `python scripts/evaluate_text.py`.")
     return metrics
 
@@ -194,7 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     api/text_main.py's /train endpoint calls build_parser().parse_args([]) to
     build the Namespace entrainer() expects. It must not call main(): main()
     parses sys.argv, which under uvicorn holds the SERVER's arguments, and
-    argparse then raises SystemExit — which `except Exception` does NOT catch,
+    argparse then raises SystemExit - which `except Exception` does NOT catch,
     wedging the job status on "running" forever. api/image_main.py documents the
     same trap for process.main() and evaluate.main().
 

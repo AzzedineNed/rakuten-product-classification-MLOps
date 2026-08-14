@@ -1,7 +1,7 @@
 """The promotion audit trail: who moved the serving alias, when, and from what.
 
 WHY THIS MATTERS. Verified directly against MLflow 3.14.0: re-pointing an alias
-is a MOVE, not a copy — the previous version's alias list comes back empty, and
+is a MOVE, not a copy - the previous version's alias list comes back empty, and
 MLflow keeps no history of the change. So "which version was in production last
 Tuesday, and who promoted it?" is unanswerable from the registry alone. The tags
 written by scripts/promote.py ARE the record; these tests are what stop them
@@ -104,7 +104,7 @@ def test_demote_closes_the_record(tmp_path, monkeypatch):
 def test_a_rejected_tag_never_undoes_a_completed_promotion(tmp_path, monkeypatch, capsys):
     """The alias moves BEFORE the tags are written. If a backend rejects a tag
     (DagsHub has been fussy about tagging before), the promotion has already
-    happened — reporting failure would tell the operator the opposite of the
+    happened - reporting failure would tell the operator the opposite of the
     truth."""
     client, name, versions = _registry(tmp_path, monkeypatch, n_versions=1)
 

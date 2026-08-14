@@ -59,7 +59,7 @@ METRICS = ServiceMetrics("text")
 # Job state for /train and /evaluate. IN-MEMORY AND PER-PROCESS, exactly like
 # the image service's: an API restart resets these to "idle", and the Airflow
 # polling loop treats "idle" while polling as an error. That is a known wart on
-# the image side and it is duplicated here DELIBERATELY — two services behaving
+# the image side and it is duplicated here DELIBERATELY - two services behaving
 # identically when both are wrong is easier to fix once than two services
 # behaving differently. Fixing it means persisting job state somewhere both
 # services read, which is a bigger change than this one.
@@ -72,7 +72,7 @@ def _busy() -> str | None:
 
     /train and /evaluate are mutually exclusive: both are CPU-bound on a 2-core
     laptop and both write into models/text and reports/text. Note this guard is
-    PER SERVICE — nothing here prevents an image retrain running at the same
+    PER SERVICE - nothing here prevents an image retrain running at the same
     time as a text retrain.
     """
     if _TRAIN_STATUS["state"] == "running":
@@ -93,7 +93,7 @@ async def lifespan(app: FastAPI):
     local .pkl files. The fallback is inside load(), so a missing or unreachable
     registry degrades to local serving instead of failing to boot.
 
-    EAGER AND ONCE. The registry is consulted exactly here, at startup — never
+    EAGER AND ONCE. The registry is consulted exactly here, at startup - never
     per request. A promotion therefore takes effect on restart, which is the
     same deal the image service offers, and means a registry outage cannot slow
     down or break traffic that is already being served.
@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI):
     """
     try:
         predictor.load(prefer_registry=True)
-        logger.info("Text model loaded from %s — API ready.", predictor.serving_source)
+        logger.info("Text model loaded from %s - API ready.", predictor.serving_source)
     except Exception as exc:  # noqa: BLE001
         logger.error("Could not load the text model: %s: %s", type(exc).__name__, exc)
     # Published in BOTH cases on purpose. On failure serving_source is still
@@ -175,7 +175,7 @@ def health():
     "registry:NAME/vN (unpromoted)" when no alias is set, "local:<file>" when
     the registry was unavailable, "not-loaded" if nothing loaded at all.
 
-    model_path is kept for continuity but is NOT that answer — it is only the
+    model_path is kept for continuity but is NOT that answer - it is only the
     local path this service would fall back to. Read model_source.
     """
     return {
@@ -239,7 +239,7 @@ def predict_batch(batch: ProduitBatch, top_k: int = 5):
 # production system runs training as a job on a worker, not as a route on the
 # process answering user traffic. They are here because Airflow is deliberately
 # kept away from the Docker daemon (no docker.sock, no sklearn in the Airflow
-# image — see the image DAG's docstring), so HTTP is the only channel the
+# image - see the image DAG's docstring), so HTTP is the only channel the
 # orchestrator has. This is a considered trade-off on a laptop, not a pattern
 # to copy. The consequence to remember: a retrain competes for memory with live
 # prediction inside one uvicorn worker.
@@ -251,7 +251,7 @@ def _run_training() -> None:
         # for pandas and scikit-learn until something actually asks to train.
         import train_text as train_script  # scripts/train_text.py
 
-        # parse_args([]) — NOT main(), and NOT a hand-built namespace. main()
+        # parse_args([]) - NOT main(), and NOT a hand-built namespace. main()
         # would parse uvicorn's argv and raise SystemExit; a hand-built
         # namespace would rot the moment the script grew an argument.
         metrics = train_script.entrainer(train_script.build_parser().parse_args([]))
@@ -273,8 +273,8 @@ def train_endpoint(background_tasks: BackgroundTasks):
     endpoint that nothing in the pipeline sets is surface without a caller. The
     hyperparameters live in rakuten_text.config; change them there.
 
-    Registers a NEW VERSION and stops. The production alias is never moved here
-    — promotion stays a deliberate human act, the same deal the image side
+    Registers a NEW VERSION and stops. The production alias is never moved
+    here. Promotion stays a deliberate human act, the same deal the image side
     offers, and the reason the registry work exists at all.
     """
     running = _busy()

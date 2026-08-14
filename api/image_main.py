@@ -6,7 +6,7 @@ Endpoints:
   POST /predict         multipart image upload -> top-k + full canonical proba
   POST /train           retrain the classifier head from cached features
                         (background task; optional ?reprocess=true to re-extract
-                        features first — the heavy step)
+                        features first - the heavy step)
   GET  /train/status    status + metrics of the last /train job
   POST /evaluate        score the current local model on the cached test
                         features and write reports/ (background task)
@@ -199,8 +199,8 @@ def _run_evaluation() -> None:
 def evaluate_endpoint(background_tasks: BackgroundTasks):
     """Score the current local model on the cached test features.
 
-    Evaluates whatever classifier.load() returns — the LOCAL .joblib, i.e. the
-    model train.py last wrote — not the registry's production alias. That is
+    Evaluates whatever classifier.load() returns - the LOCAL .joblib, i.e. the
+    model train.py last wrote - not the registry's production alias. That is
     what an orchestrated train -> evaluate chain needs: the metrics describe the
     model that was just trained, not the one currently being served.
     """

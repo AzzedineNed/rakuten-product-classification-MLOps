@@ -22,7 +22,7 @@ services:
       - torch-cache:/root/.cache/torch
     environment:
       - RAKUTEN_CLASSIFIER=mlp
-    # Inject secrets (MLflow/DagsHub creds) at RUNTIME — .env is excluded from
+    # Inject secrets (MLflow/DagsHub creds) at RUNTIME - .env is excluded from
     # the image by .dockerignore, so this is the only way the container gets
     # them, and they never end up baked into image layers.
     env_file:
@@ -70,7 +70,7 @@ services:
       # It was read-only before, and the reasoning behind that is still sound
       # FOR SERVING: MLflow downloads a registered version to a temp dir
       # (mlflow.utils.file_utils.create_tmp_dir falls through to
-      # tempfile.mkdtemp(), i.e. /tmp in this container — verified in the
+      # tempfile.mkdtemp(), i.e. /tmp in this container - verified in the
       # installed mlflow 3.14.0 source), never into models/, so a serving-only
       # container genuinely never needs to write here. Training does:
       # scripts/train_text.py writes models/text/{tfidf_vectorizer,
@@ -87,7 +87,7 @@ services:
     # Registry-aware serving needs the DagsHub MLflow credentials at RUNTIME.
     # Without this the container has no MLFLOW_TRACKING_URI, so it would fall
     # back to the local .pkl files forever while looking like it resolves an
-    # alias — the exact failure this step exists to remove.
+    # alias - the exact failure this step exists to remove.
     #
     # FOLLOW-UP (least privilege): .env also carries ENS_USERNAME/ENS_PASSWORD,
     # which this service never uses. Passing only what it needs looks like:
@@ -111,7 +111,7 @@ services:
     #
     # 1.5g is the peak plus ~78% headroom, the same proportion the image
     # service's 2.5g gives its 1.48 GiB peak. The previous 1g would have put the
-    # peak at 84% of the ceiling — survivable on this run, and one larger
+    # peak at 84% of the ceiling - survivable on this run, and one larger
     # vocabulary away from an OOM kill mid-training.
     mem_limit: 1.5g
 
@@ -145,7 +145,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-    # PROVISIONAL — NOT MEASURED. Should be the smallest of the three: numpy,
+    # PROVISIONAL - NOT MEASURED. Should be the smallest of the three: numpy,
     # requests and FastAPI, no model, no torch.
     mem_limit: 512m
 
@@ -233,7 +233,7 @@ services:
     # targets by design.
     restart: unless-stopped
 
-    # PROVISIONAL — NOT MEASURED. Four targets at 15s is a trivial workload,
+    # PROVISIONAL - NOT MEASURED. Four targets at 15s is a trivial workload,
     # but the TSDB head block and query engine are not free. Confirm with
     # `docker stats` and tighten, the same way the other limits were.
     mem_limit: 512m
@@ -241,7 +241,7 @@ services:
     # VERIFIED on prom/prometheus:v3.0.0: the image ships busybox wget at
     # /bin/wget and no curl, so this uses the same wget form as the nginx
     # service above. /-/healthy is Prometheus's own liveness endpoint and does
-    # not depend on any scrape target being reachable — a stack where every
+    # not depend on any scrape target being reachable - a stack where every
     # target is down should still show Prometheus itself as healthy.
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/healthy"]
@@ -278,7 +278,7 @@ services:
       # Grafana is reached at http://<host>/grafana/ through nginx. Both of
       # these are required: ROOT_URL so generated links carry the prefix, and
       # SERVE_FROM_SUB_PATH so Grafana serves under it. With SERVE_FROM_SUB_PATH
-      # true, nginx must NOT strip the prefix — see nginx/default.conf, where
+      # true, nginx must NOT strip the prefix - see nginx/default.conf, where
       # the proxy_pass for /grafana/ deliberately has no trailing slash.
       # Override GRAFANA_ROOT_URL in .env if you reach the host by LAN IP
       # rather than localhost.
@@ -286,7 +286,7 @@ services:
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
       - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_USERS_ALLOW_SIGN_UP=false
-      # Telemetry off — this is a coursework stack, not a fleet.
+      # Telemetry off - this is a coursework stack, not a fleet.
       - GF_ANALYTICS_REPORTING_ENABLED=false
       - GF_ANALYTICS_CHECK_FOR_UPDATES=false
     # Grafana starts fine without Prometheus and shows the datasource as down,
@@ -295,7 +295,7 @@ services:
       - prometheus
     restart: unless-stopped
 
-    # PROVISIONAL — NOT MEASURED. Measure with `docker stats` and tighten.
+    # PROVISIONAL - NOT MEASURED. Measure with `docker stats` and tighten.
     mem_limit: 512m
 
     # VERIFIED on grafana/grafana:11.3.0: the image ships BOTH wget and curl.

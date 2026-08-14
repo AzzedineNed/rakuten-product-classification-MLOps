@@ -1,4 +1,4 @@
-"""Characterization tests for api/text_main.py — the service AS IT IS TODAY.
+"""Characterization tests for api/text_main.py - the service AS IT IS TODAY.
 
 WHY THIS FILE EXISTS. Until now no test imported api/ at all: the three FastAPI
 services were the only untested code in the project, and they are the part users
@@ -14,8 +14,8 @@ Run naively, this file would behave differently on three machines: green here
 (no artifacts, no credentials), registry-backed on the developer's laptop (where
 models/text/*.pkl and MLFLOW_TRACKING_URI both exist), and network-dependent in
 CI. A test whose result depends on which machine ran it is not a test. So
-`predictor.load` is always replaced, and the two states that matter — loaded and
-not-loaded — are produced deliberately rather than found.
+`predictor.load` is always replaced, and the two states that matter - loaded and
+not-loaded - are produced deliberately rather than found.
 
 COUNTERS ARE ASSERTED AS DELTAS. ServiceMetrics defaults to prometheus_client's
 global REGISTRY, and api.text_main builds exactly one instance at import, so
@@ -105,7 +105,7 @@ def _sample(name: str, labels: dict) -> float:
 
 
 # --------------------------------------------------------------------------- #
-# The service with NO model — the state an orchestrator must be told about
+# The service with NO model - the state an orchestrator must be told about
 # --------------------------------------------------------------------------- #
 def test_startup_survives_a_load_failure(monkeypatch):
     """A missing or corrupt artifact must NOT stop the service booting.
@@ -128,7 +128,7 @@ def test_health_reports_not_loaded_truthfully(monkeypatch):
     assert body["num_classes"] == config.NUM_CLASSES == 27
     assert body["registered_model"] == config.REGISTERED_MODEL_NAME
     # model_path is the LOCAL FALLBACK path, not the answer to "what is being
-    # served" — it is reported even when nothing loaded.
+    # served" - it is reported even when nothing loaded.
     assert body["model_path"] == str(config.MODEL_PATH)
 
 
@@ -162,7 +162,7 @@ def test_predict_batch_is_503_when_the_model_is_missing(monkeypatch):
 
 
 def test_metrics_is_served_even_with_no_model(monkeypatch):
-    """/metrics must work in the degraded state — that is when it matters most."""
+    """/metrics must work in the degraded state - that is when it matters most."""
     with _client(monkeypatch, loaded=False) as client:
         response = client.get("/metrics")
     assert response.status_code == 200
@@ -219,7 +219,7 @@ def test_top_k_is_clamped_into_range(monkeypatch, requested, expected):
 
 
 def test_batch_clamps_top_k_the_same_way(monkeypatch):
-    """The batch endpoint clamps independently of /predict — it has its own copy
+    """The batch endpoint clamps independently of /predict - it has its own copy
     of the line. Added because a mutant that broke ONLY the batch clamp survived
     the single-product test above.
     """
@@ -370,7 +370,7 @@ def test_the_probability_vector_follows_the_canonical_class_order(monkeypatch):
 # Training and evaluation endpoints
 #
 # The real jobs are never run here: they need the dataset, minutes of CPU and
-# the registry. What IS tested is everything around them — the 409 guard, the
+# the registry. What IS tested is everything around them - the 409 guard, the
 # status lifecycle, what reaches the status dict on failure, and the argparse
 # trap that would wedge a job on "running" forever.
 # --------------------------------------------------------------------------- #
@@ -484,7 +484,7 @@ def test_a_training_failure_is_reported_not_swallowed(monkeypatch):
 def test_a_systemexit_does_not_wedge_the_job_on_running(monkeypatch, runner,
                                                         status_name, module):
     """THE TRAP THIS GUARDS. SystemExit does not derive from Exception, so an
-    `except Exception` would let argparse — or any sys.exit — kill the
+    `except Exception` would let argparse - or any sys.exit - kill the
     background task silently, leaving the status on "running" forever. The DAG
     could then only ever report a timeout, hours later."""
     class FakeScript:
@@ -529,7 +529,7 @@ def test_evaluation_records_metrics_on_success(monkeypatch):
         @staticmethod
         def evaluer(args):
             # The endpoint must score the TEST split and must NOT generate the
-            # submission predictions — both are argparse defaults.
+            # submission predictions - both are argparse defaults.
             assert args.split == "test"
             assert args.predict_test is False
             return fake

@@ -59,7 +59,7 @@ def charger_split_meta() -> dict:
         raise SystemExit(
             f"{config.SPLIT_PATH} introuvable. Ce fichier est écrit par "
             "`python scripts/train_text.py`. Sans lui, le split ne peut pas "
-            "être vérifié — relancez l'entraînement."
+            "être vérifié - relancez l'entraînement."
         )
     with open(config.SPLIT_PATH, encoding="utf-8") as f:
         return json.load(f)
@@ -90,7 +90,7 @@ def charger_donnees(meta: dict, split_name: str):
             ecarts.append(f"  {nom}: {obtenu} != {attendu} (enregistré)")
     if ecarts:
         raise SystemExit(
-            "Le partitionnement a changé depuis l'entraînement — toute métrique "
+            "Le partitionnement a changé depuis l'entraînement - toute métrique "
             "calculée ici serait incomparable. Réentraînez.\n" + "\n".join(ecarts)
         )
     logger.info("Empreintes des 3 splits vérifiées (scoring sur '%s' : %s).",
@@ -182,7 +182,7 @@ def evaluer(args):
         zero_division=0,
     )
     print("\n" + "=" * 80)
-    print(f"RÉSULTATS — Régression Logistique (texte), split '{args.split}'")
+    print(f"RÉSULTATS: Régression Logistique (texte), split '{args.split}'")
     print("=" * 80)
     print(f"Accuracy            : {accuracy:.4f}")
     print(f"F1-score (weighted) : {f1_w:.4f}")

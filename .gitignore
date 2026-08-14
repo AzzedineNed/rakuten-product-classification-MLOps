@@ -20,7 +20,7 @@ venv/
 .env
 
 # Airflow: secrets and runtime state. NOTE the bare `.env` above does NOT match
-# `airflow/.env.airflow` — that pattern only matches a file named exactly .env.
+# `airflow/.env.airflow` - that pattern only matches a file named exactly .env.
 airflow/.env.airflow
 airflow/logs/
 airflow/plugins/

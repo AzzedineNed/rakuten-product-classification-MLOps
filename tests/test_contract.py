@@ -190,7 +190,7 @@ def test_fusion_rejects_out_of_range_weight():
 # Moved into rakuten_common.split from rakuten_text/train.py when the text
 # entrypoints went to scripts/: evaluate imported it from train, and once both
 # were scripts that would have been script-importing-script, which does not
-# work. It is modality-agnostic anyway — it hashes labels.
+# work. It is modality-agnostic anyway - it hashes labels.
 #
 # The fingerprint is a SAFETY device: train records it, evaluate re-checks it,
 # and a mismatch stops evaluation rather than scoring against a partition the

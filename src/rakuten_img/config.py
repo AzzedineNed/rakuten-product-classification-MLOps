@@ -138,7 +138,7 @@ EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME", "rakuten-image")
 REGISTERED_MODEL_NAME = os.getenv("RAKUTEN_REGISTERED_MODEL", "rakuten-image-classifier")
 
 # The alias that marks the version serving traffic. Promotion is an EXPLICIT,
-# human step (scripts/promote.py) — training never promotes itself, so a bad
+# human step (scripts/promote.py) - training never promotes itself, so a bad
 # run cannot become the served model just by being the most recent one.
 # predict.py resolves this alias first and falls back to the newest version if
 # nothing has been promoted yet. MLflow "stages" are deprecated in MLflow 3;
@@ -149,7 +149,7 @@ PRODUCTION_ALIAS = os.getenv("RAKUTEN_PRODUCTION_ALIAS", "production")
 # Cached artifacts
 # --------------------------------------------------------------------------- #
 def feature_files(split: str) -> tuple[Path, Path]:
-    """(X_path, y_path) for a split in {'train','val','test'} — the FINAL files
+    """(X_path, y_path) for a split in {'train','val','test'} - the FINAL files
     used by train/evaluate (train is resampled)."""
     return PROCESSED_DIR / f"X_{split}.npy", PROCESSED_DIR / f"y_{split}.npy"
 
@@ -168,13 +168,13 @@ CLASSIFIER_PATH = MODELS_DIR / "image_classifier.joblib"
 # Run parameters snapshot
 # --------------------------------------------------------------------------- #
 def run_params() -> dict:
-    """A single, flat snapshot of the parameters that define a run — backbone,
+    """A single, flat snapshot of the parameters that define a run - backbone,
     split, resampling, and classifier settings.
 
     This is a pure read of the constants above (no new state, no side effects).
     It exists as a single obvious hook: anything that later wants to record what
-    a run was configured with — an experiment tracker, a metadata file, a log
-    line — can call this instead of reaching into individual constants. Nothing
+    a run was configured with - an experiment tracker, a metadata file, a log
+    line - can call this instead of reaching into individual constants. Nothing
     in the pipeline depends on it today.
     """
     return {

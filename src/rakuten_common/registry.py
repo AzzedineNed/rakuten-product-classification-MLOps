@@ -11,7 +11,7 @@ falls back to the newest version rather than refusing to serve.
 
 Why this is not modality-specific: it takes a client, a registered model name
 and an alias, and returns a version. It knows nothing about images, text,
-torch, or sklearn — which is exactly the contract of this package.
+torch, or sklearn - which is exactly the contract of this package.
 
 WHAT THIS MODULE DELIBERATELY DOES NOT DO: download artifacts or load a model.
 Those differ per modality (the image side is one joblib payload, the text side
@@ -32,7 +32,7 @@ def resolve_registry_version(client, name: str, alias: Optional[str] = None):
     alias resolves, otherwise the highest version number.
 
     Returns (version_object, source_string). Raises LookupError only when the
-    registered model has no versions at all — the CALLER decides what to do
+    registered model has no versions at all - the CALLER decides what to do
     then (both services fall back to a local artifact so serving never
     hard-fails).
 
@@ -49,7 +49,7 @@ def resolve_registry_version(client, name: str, alias: Optional[str] = None):
         # No alias set yet (fresh registry), a typo'd alias, or a backend that
         # does not implement aliases. All three mean the same thing here: fall
         # back to newest-version behaviour rather than failing to serve.
-        print(f"ℹ️  No '{alias}' alias on '{name}' ({type(exc).__name__}) — "
+        print(f"ℹ️  No '{alias}' alias on '{name}' ({type(exc).__name__}) - "
               f"falling back to the newest version.")
     versions = client.search_model_versions(f"name='{name}'")
     if not versions:

@@ -10,7 +10,7 @@ asserting against a fake that could not tell the two shapes apart.
 Two layers, mirroring tests/test_registry.py:
 
   * Fast tests with no mlflow at all, so CI (requirements-ci.txt omits mlflow)
-    still covers the fallback policy — which is the part that decides whether
+    still covers the fallback policy - which is the part that decides whether
     the service serves or 503s.
   * The same expectations against a REAL MLflow registry (SQLite + a local
     artifact store inside tmp_path), skipped when mlflow is absent.
@@ -72,7 +72,7 @@ def test_default_load_never_touches_the_registry(tmp_path, monkeypatch):
     different model than the one training just wrote.
 
     NOTE: this records the call rather than raising from the stub. Raising does
-    NOT work here — load()'s fallback catches Exception, AssertionError is an
+    NOT work here - load()'s fallback catches Exception, AssertionError is an
     Exception, so a raising stub is swallowed and the test passes even when the
     registry WAS consulted. Found by mutation-testing this very test.
     """
@@ -95,7 +95,7 @@ def test_prefer_registry_defaults_to_false():
 
 
 def test_registry_success_wins_and_disk_is_not_read(tmp_path, monkeypatch):
-    """When the registry answers, its objects are served — proven by pointing
+    """When the registry answers, its objects are served - proven by pointing
     the local paths at files that do not exist."""
     marker = {"src": "registry-model"}
     monkeypatch.setattr(
@@ -160,7 +160,7 @@ def test_serving_http_limits_are_small_enough_to_boot(tmp_path, monkeypatch):
     """A dead registry must not hold a container's startup hostage.
 
     MEASURED against an unreachable tracking URI: MLflow's shipped defaults (7
-    retries, 120s timeout) blocked for OVER 170 SECONDS before being killed —
+    retries, 120s timeout) blocked for OVER 170 SECONDS before being killed,
     and resolving an alias costs two requests, so the real figure is worse. With
     these limits the same call gave up in 10.4s. compose's healthcheck allows
     30s start_period + 5x30s, and the gateway waits on text-api being healthy,
@@ -292,7 +292,7 @@ def test_real_registry_version_missing_a_file_is_rejected_by_name(tmp_path, monk
     The assertions below deliberately check the GUARD's own wording, not just
     the filename: joblib.load raises FileNotFoundError naming the file all by
     itself, so a filename-only assertion passes even with the guard deleted
-    (verified by mutation). What the guard adds — and what is worth keeping — is
+    (verified by mutation). What the guard adds - and what is worth keeping - is
     naming every missing file at once and listing what the version DOES contain,
     which is what you need to diagnose a bad version in a remote registry.
     """
@@ -321,7 +321,7 @@ def test_real_registry_end_to_end_through_the_predictor(tmp_path, monkeypatch):
 
 @pytest.mark.slow
 def test_registry_reachable_but_model_unregistered_falls_back(tmp_path, monkeypatch):
-    """Tracking configured, nothing registered yet — the first deploy. Serving
+    """Tracking configured, nothing registered yet - the first deploy. Serving
     must come up on the local artifacts instead of refusing."""
     mlflow = pytest.importorskip("mlflow", reason="mlflow not installed (CI subset)")
     uri = f"sqlite:///{tmp_path}/mlflow.db"

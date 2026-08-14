@@ -6,7 +6,7 @@ coverage. tests/test_registry.py covers rakuten_common.registry
 .resolve_registry_version and nothing else; tests/test_pipeline.py covers
 build/save/load/reorder. Nothing exercised the registry publish/pull pair now
 in rakuten_img.tracking, or the registry-first/local-fallback policy in
-scripts/predict.py — which is the code that decides whether the image service
+scripts/predict.py - which is the code that decides whether the image service
 serves or 503s, and the code with the most exposure to a DagsHub outage.
 
 These are CHARACTERIZATION tests: they pin the behaviour as it stands TODAY, so
@@ -71,7 +71,7 @@ def serving(monkeypatch, tmp_path):
 
     NOTE the __defaults__ patch. classifier.load() and classifier.save() capture
     config.CLASSIFIER_PATH as a DEFAULT ARGUMENT, evaluated once at import, so
-    monkeypatching config.CLASSIFIER_PATH alone does NOT redirect them — see
+    monkeypatching config.CLASSIFIER_PATH alone does NOT redirect them - see
     test_default_model_path_is_bound_at_import_not_call_time. Both have to move
     together or the test would read the developer's real models/ directory.
     """
@@ -107,7 +107,7 @@ def test_model_source_is_not_loaded_before_any_prediction(serving):
 
 
 def test_registry_success_is_served_and_local_disk_is_not_read(serving, monkeypatch):
-    """When the registry answers, its payload is served — proven by leaving the
+    """When the registry answers, its payload is served - proven by leaving the
     local .joblib absent entirely."""
     served = _payload("registry")
     served["serving_source"] = "registry:rakuten-image-classifier@production/v2"
@@ -252,7 +252,7 @@ def test_default_model_path_is_bound_at_import_not_call_time(tmp_path, monkeypat
 # --------------------------------------------------------------------------
 def _real_registry(tmp_path, monkeypatch, markers, alias_on=None, tags=None):
     """Stand up a real SQLite registry and publish one version per entry in
-    `markers` THROUGH tracking.register_model — the function under test,
+    `markers` THROUGH tracking.register_model - the function under test,
     so the write side is exercised rather than simulated.
 
     artifact_location is forced inside tmp_path: the default would create
@@ -390,7 +390,7 @@ def test_a_bad_run_id_returns_none_instead_of_raising(tmp_path, monkeypatch, cap
 @pytest.mark.slow
 def test_nothing_registered_yet_raises_lookuperror(tmp_path, monkeypatch):
     """The first deploy: tracking configured, registry empty. load_from_registry
-    raises so the caller can fall back — see the next test."""
+    raises so the caller can fall back - see the next test."""
     mlflow = pytest.importorskip("mlflow", reason="mlflow not installed (CI subset)")
     uri = f"sqlite:///{tmp_path}/mlflow.db"
     mlflow.set_tracking_uri(uri)
@@ -492,7 +492,7 @@ def test_log_training_run_records_params_metrics_and_tags(tmp_path, monkeypatch)
 @pytest.mark.slow
 def test_attach_evaluation_reopens_the_training_run(tmp_path, monkeypatch):
     """ONE RUN PER MODEL. The test metrics must land on the training run, and
-    stage must still say 'train' — overwriting it would erase how the run
+    stage must still say 'train' - overwriting it would erase how the run
     started."""
     mlflow = _tracking_server(tmp_path, monkeypatch)
     run_id = tracking.log_training_run({"backbone": "mobilenet_v2"}, {"train_samples": 10})
@@ -572,7 +572,7 @@ def test_serving_http_limits_are_small_enough_to_stay_responsive():
     """A dead registry must not make the first /predict appear to hang.
 
     MEASURED on the text side against an unreachable tracking URI: MLflow's
-    shipped defaults (7 retries, 120s timeout) blocked for OVER 170 SECONDS —
+    shipped defaults (7 retries, 120s timeout) blocked for OVER 170 SECONDS,
     and resolving an alias costs two requests, so the real figure is worse. The
     image side reaches the registry lazily, on the first prediction rather than
     at startup, so the same outage shows up as a request that never returns

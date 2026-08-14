@@ -49,7 +49,7 @@ def enabled() -> bool:
 # How long a SERVING process may block on an unreachable registry before giving
 # up and using the local artifacts. MLflow's shipped defaults are tuned for
 # batch jobs riding out rate limits: 7 retries with an exponential backoff and a
-# 120s per-request timeout, which its own source comments as "~4 minutes" — and
+# 120s per-request timeout, which its own source comments as "~4 minutes" - and
 # resolving an alias costs TWO requests when the alias lookup fails, so a dead
 # tracking server can block a container's startup for the better part of ten
 # minutes. That turns "degrade to the local model" into a boot hang, and with
@@ -68,7 +68,7 @@ def _set_experiment(mlflow) -> None:
 def log_training_run(params: dict, metrics: dict) -> Optional[str]:
     """Log params + train/val metrics. Returns the run_id, or None. Never raises."""
     if not enabled():
-        print("ℹ️  MLFLOW_TRACKING_URI not set — skipping experiment logging.")
+        print("ℹ️  MLFLOW_TRACKING_URI not set - skipping experiment logging.")
         return None
     try:
         import mlflow
@@ -81,7 +81,7 @@ def log_training_run(params: dict, metrics: dict) -> Optional[str]:
             mlflow.log_metrics({k: float(v) for k, v in metrics.items()
                                 if isinstance(v, (int, float))})
             run_id = run.info.run_id
-        print(f"📝 Logged training run to MLflow (run_id={run_id[:8]}…).")
+        print(f"📝 Logged training run to MLflow (run_id={run_id[:8]}...).")
         return run_id
     except Exception as exc:  # noqa: BLE001
         print(f"⚠️  MLflow logging skipped ({type(exc).__name__}: {exc}).")
@@ -103,7 +103,7 @@ def register_model(run_id: Optional[str],
     if not enabled():
         return None
     if not run_id:
-        print("ℹ️  No MLflow run_id — skipping model registration.")
+        print("ℹ️  No MLflow run_id - skipping model registration.")
         return None
     try:
         from mlflow import MlflowClient
@@ -128,7 +128,7 @@ def register_model(run_id: Optional[str],
 
         source = f"{client.get_run(run_id).info.artifact_uri}/model"
         mv = client.create_model_version(name=name, source=source, run_id=run_id)
-        print(f"📦 Registered '{name}' version {mv.version} (run {run_id[:8]}…).")
+        print(f"📦 Registered '{name}' version {mv.version} (run {run_id[:8]}...).")
 
         # One tag at a time: the version already exists and a rejected tag must
         # not turn a success into a failure. (Same approach the image side uses
@@ -149,9 +149,9 @@ def load_from_registry(alias: Optional[str] = None):
     artifacts from it.
 
     Returns (vectorizer, model, source_string), where source_string is the one
-    produced by rakuten_common.registry — "registry:NAME@alias/vN" for a
+    produced by rakuten_common.registry - "registry:NAME@alias/vN" for a
     deliberate promotion, "registry:NAME/vN (unpromoted)" for a fallback to the
-    newest version — so /health can show an operator which it is.
+    newest version - so /health can show an operator which it is.
 
     RAISES on every failure (no tracking URI, no versions, network down, a
     version whose artifacts are the wrong shape). The CALLER decides the
@@ -165,7 +165,7 @@ def load_from_registry(alias: Optional[str] = None):
     directory containing both files.
     """
     if not enabled():
-        raise RuntimeError("MLFLOW_TRACKING_URI not set — registry unavailable.")
+        raise RuntimeError("MLFLOW_TRACKING_URI not set - registry unavailable.")
 
     # Must happen BEFORE the mlflow import/first request; see _SERVING_HTTP_LIMITS.
     for key, value in _SERVING_HTTP_LIMITS.items():
@@ -238,7 +238,7 @@ def attach_evaluation(run_id: Optional[str], metrics: dict,
                 if p.exists():
                     mlflow.log_artifact(str(p), artifact_path=artifact_path)
         if linked:
-            print(f"📝 Attached test metrics to the training run ({run_id[:8]}…).")
+            print(f"📝 Attached test metrics to the training run ({run_id[:8]}...).")
         else:
             print("📝 Logged a standalone evaluation run (no training run_id found).")
     except Exception as exc:  # noqa: BLE001

@@ -39,7 +39,7 @@ test:
 	$(PY) -m pytest -q
 
 # The edit loop. Skips the tests that stand up a real MLflow registry.
-# Run `make test` before opening a PR — CI runs everything.
+# Run `make test` before opening a PR - CI runs everything.
 test-fast:
 	$(PY) -m pytest -q -m "not slow"
 

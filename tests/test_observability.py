@@ -133,7 +133,7 @@ def test_records_count_and_latency_for_a_normal_request():
 
 def test_a_raising_handler_is_recorded_as_500_and_the_exception_still_propagates():
     """VERIFIED against starlette 0.37.2: when a handler raises, the exception
-    passes through this middleware with NO http.response.start sent — the 500
+    passes through this middleware with NO http.response.start sent - the 500
     the client sees is produced by ServerErrorMiddleware ABOVE us. Recording
     only on a clean return would therefore make every 500 invisible."""
     metrics = fresh()

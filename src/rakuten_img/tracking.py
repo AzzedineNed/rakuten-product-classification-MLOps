@@ -62,12 +62,12 @@ def enabled() -> bool:
 # How long a SERVING process may block on an unreachable registry before giving
 # up and using the local artifact. MLflow's shipped defaults are tuned for batch
 # jobs riding out rate limits: 7 retries with an exponential backoff and a 120s
-# per-request timeout, which its own source comments as "~4 minutes" — and
+# per-request timeout, which its own source comments as "~4 minutes" - and
 # resolving an alias costs TWO requests when the alias lookup fails, so a dead
 # tracking server can block for the better part of ten minutes. On the image
 # side that lands on the FIRST /predict rather than at startup (the payload
 # resolves lazily), so the cost is a request that appears to hang instead of a
-# boot that appears to hang — the same outage, worn differently. These are
+# boot that appears to hang - the same outage, worn differently. These are
 # setdefault, not assignment: an operator can still raise them.
 #
 # Copied deliberately from rakuten_text.tracking, which measured the numbers.
@@ -89,7 +89,7 @@ def log_training_run(params: dict, metrics: dict) -> Optional[str]:
     attach_evaluation reopens it. Losing it costs the link, not the model.
     """
     if not enabled():
-        print("ℹ️  MLFLOW_TRACKING_URI not set — skipping experiment logging.")
+        print("ℹ️  MLFLOW_TRACKING_URI not set - skipping experiment logging.")
         return None
     try:
         import mlflow
@@ -101,7 +101,7 @@ def log_training_run(params: dict, metrics: dict) -> Optional[str]:
             mlflow.log_params(params)
             mlflow.log_metrics({k: float(v) for k, v in metrics.items()})
             run_id = run.info.run_id
-        print(f"📝 Logged training run to MLflow (run_id={run_id[:8]}…).")
+        print(f"📝 Logged training run to MLflow (run_id={run_id[:8]}...).")
         return run_id
     except Exception as exc:  # noqa: BLE001
         # A tracking outage, bad creds, or missing mlflow must not lose a model
@@ -123,13 +123,13 @@ def register_model(run_id: Optional[str],
     classifier type, host vs container, ...) so a human comparing versions in
     the registry UI can tell them apart. They confer no privilege: nothing is
     served because of a tag. Promotion is the separate, explicit alias step in
-    scripts/promote.py. Tagging failures are logged and ignored — a tag is not
+    scripts/promote.py. Tagging failures are logged and ignored - a tag is not
     worth losing a registered version over.
     """
     if not enabled():
         return None
     if not run_id:
-        print("ℹ️  No MLflow run_id — skipping model registration.")
+        print("ℹ️  No MLflow run_id - skipping model registration.")
         return None
     try:
         from mlflow import MlflowClient
@@ -150,7 +150,7 @@ def register_model(run_id: Optional[str],
         # 3) New version pointing at that artifact.
         source = f"{client.get_run(run_id).info.artifact_uri}/model/{path.name}"
         mv = client.create_model_version(name=name, source=source, run_id=run_id)
-        print(f"📦 Registered '{name}' version {mv.version} (run {run_id[:8]}…).")
+        print(f"📦 Registered '{name}' version {mv.version} (run {run_id[:8]}...).")
         # 4) Descriptive tags, set one at a time (the call we verified works on
         #    DagsHub). Each is independently best-effort: the version is already
         #    created and a missing tag must not turn success into failure.
@@ -172,7 +172,7 @@ def load_from_registry(alias: Optional[str] = None) -> dict:
     the one aliased `config.PRODUCTION_ALIAS`, else the newest version.
 
     Raises on any failure (no tracking URI, no registered versions, network
-    down, bad artifact) — the CALLER decides the fallback; see
+    down, bad artifact) - the CALLER decides the fallback; see
     scripts/predict.py, which falls back to the local .joblib so serving never
     hard-fails. Returns the usual payload dict plus a 'serving_source' key,
     which /health surfaces so an operator can tell a deliberate promotion
@@ -180,7 +180,7 @@ def load_from_registry(alias: Optional[str] = None) -> dict:
     (unpromoted)") at a glance.
     """
     if not enabled():
-        raise RuntimeError("MLFLOW_TRACKING_URI not set — registry unavailable.")
+        raise RuntimeError("MLFLOW_TRACKING_URI not set - registry unavailable.")
 
     # Must happen BEFORE the mlflow import / first request; see
     # _SERVING_HTTP_LIMITS. MLflow reads these per request, so setting them here
@@ -213,12 +213,12 @@ def attach_evaluation(run_id: Optional[str], metrics: dict,
 
     `artifacts` is a sequence of (mlflow_artifact_path, local_file) PAIRS rather
     than the dict rakuten_text.tracking uses, because the image side logs two
-    different files — the classification report and metrics.json — under the
+    different files - the classification report and metrics.json - under the
     same 'reports' path, which a dict keyed by artifact path cannot express.
     Missing files are skipped rather than raised on.
     """
     if not enabled():
-        print("ℹ️  MLFLOW_TRACKING_URI not set — skipping experiment logging.")
+        print("ℹ️  MLFLOW_TRACKING_URI not set - skipping experiment logging.")
         return
     try:
         import mlflow
@@ -230,7 +230,7 @@ def attach_evaluation(run_id: Optional[str], metrics: dict,
             mlflow.set_tag("modality", "image")
             if not linked:
                 # Only tag stage on a standalone run. When reopening the
-                # training run we leave stage="train" intact — overwriting it
+                # training run we leave stage="train" intact - overwriting it
                 # would erase how the run started.
                 mlflow.set_tag("stage", "evaluate-standalone")
             # Log only numeric metrics (skip the string entries backbone /
@@ -244,7 +244,7 @@ def attach_evaluation(run_id: Optional[str], metrics: dict,
                     mlflow.log_artifact(str(p), artifact_path=artifact_path)
         if linked:
             print(f"📝 Attached test metrics + confusion matrix to training run "
-                  f"({run_id[:8]}…).")
+                  f"({run_id[:8]}...).")
         else:
             print("📝 Logged a standalone evaluation run (no training run_id found).")
     except Exception as exc:  # noqa: BLE001

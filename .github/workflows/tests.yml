@@ -49,7 +49,7 @@ jobs:
           python -c "import sklearn, numpy, pandas, PIL; print('scikit-learn', sklearn.__version__); print('numpy       ', numpy.__version__); print('pandas      ', pandas.__version__); print('pillow      ', PIL.__version__)"
 
       # No PYTHONPATH needed: tests/conftest.py puts src/ on sys.path.
-      # No dataset, no DVC pull, no MLflow credentials — the suite is
+      # No dataset, no DVC pull, no MLflow credentials - the suite is
       # deliberately data-free and network-free.
       - name: Run tests
         run: pytest tests/ -q --durations=5

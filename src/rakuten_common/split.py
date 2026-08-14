@@ -137,8 +137,8 @@ def split_fingerprint(labels) -> str:
     rakuten_text/train.py and imported by rakuten_text/evaluate.py; once both
     of those moved to scripts/ that import would have been script-importing-
     script, which does not work because scripts/ is not a package. It is also
-    modality-agnostic by nature — it hashes labels and knows nothing about text
-    — so rakuten_common is where it belonged all along.
+    modality-agnostic by nature, it hashes labels and knows nothing about text,
+    so rakuten_common is where it belonged all along.
     """
     joined = ",".join(str(x) for x in sorted(labels))
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]

@@ -92,7 +92,7 @@ def reorder_to_canonical(proba: np.ndarray, model_classes) -> np.ndarray:
     """Reorder a predict_proba row/matrix so columns follow CANONICAL_CLASSES.
 
     With integer prdtypecode labels, sklearn already sorts classes numerically
-    (== canonical), so this is usually an identity reorder — but we do it
+    (== canonical), so this is usually an identity reorder - but we do it
     explicitly so the contract holds even if the label set ever changes.
     """
     index = {int(c): i for i, c in enumerate(model_classes)}

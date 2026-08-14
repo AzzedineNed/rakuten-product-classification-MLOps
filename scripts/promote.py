@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""promote.py — Decide which registered model version serves traffic.
+"""promote.py - Decide which registered model version serves traffic.
 
 Training registers a new version every time it runs and tags it with what it
 is (val F1, classifier type, host/container). It deliberately does NOT promote
 anything: if "newest" automatically meant "served", a bad or accidental run
-would silently take over serving. Promotion is this script — an explicit,
+would silently take over serving. Promotion is this script - an explicit,
 human, auditable step that moves the `production` alias
 (config.PRODUCTION_ALIAS) onto a version you have actually looked at.
 
@@ -32,7 +32,7 @@ from rakuten_img import config
 
 def _client():
     if not os.getenv("MLFLOW_TRACKING_URI"):
-        sys.exit("❌ MLFLOW_TRACKING_URI is not set — nothing to promote against.")
+        sys.exit("❌ MLFLOW_TRACKING_URI is not set - nothing to promote against.")
     from mlflow import MlflowClient
     return MlflowClient()
 
@@ -78,7 +78,7 @@ def _tag(client, name: str, version: str, tags: dict) -> None:
     """Best-effort tagging, ONE TAG AT A TIME.
 
     Called only AFTER the alias has already moved. A rejected tag must never
-    turn a completed promotion into a failure — the serving change is real
+    turn a completed promotion into a failure - the serving change is real
     whether or not the audit tag stuck, and exiting here would leave the
     operator believing nothing happened. Failures are printed, not raised.
     """
@@ -87,7 +87,7 @@ def _tag(client, name: str, version: str, tags: dict) -> None:
             client.set_model_version_tag(name, version, key, str(value))
         except Exception as exc:  # noqa: BLE001
             print(f"⚠️  Could not tag v{version} {key}={value} "
-                  f"({type(exc).__name__}) — the alias DID move.")
+                  f"({type(exc).__name__}) - the alias DID move.")
 
 
 def _utc_now() -> str:
@@ -112,11 +112,11 @@ def promote(client, name: str, alias: str, version: str) -> None:
             sys.exit(f"❌ Could not list artifacts for run {mv.run_id[:8]} "
                      f"({type(exc).__name__}: {exc}).")
         if not files:
-            sys.exit(f"❌ v{version} has no files under 'model/' — refusing to "
+            sys.exit(f"❌ v{version} has no files under 'model/' - refusing to "
                      f"promote a version with no downloadable artifact.")
         print(f"✅ v{version} artifact present: {', '.join(files)}")
     else:
-        print(f"⚠️  v{version} has no run_id — skipping the artifact check.")
+        print(f"⚠️  v{version} has no run_id - skipping the artifact check.")
 
     previous = _current_alias_version(client, name, alias)
     client.set_registered_model_alias(name, alias, version)
@@ -125,7 +125,7 @@ def promote(client, name: str, alias: str, version: str) -> None:
     now = _current_alias_version(client, name, alias)
     # str() on BOTH sides: MLflow 3.14.0 returns ModelVersion.version as an int
     # against a local backend, while DagsHub's REST layer returns a string. A
-    # bare `!=` therefore aborts here AFTER the alias has already moved —
+    # bare `!=` therefore aborts here AFTER the alias has already moved,
     # telling the operator the promotion failed when it succeeded. Caught by
     # tests/test_promote.py running against a real local registry.
     if str(now) != str(version):

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""train.py — Train the classifier head on cached features.
+"""train.py - Train the classifier head on cached features.
 
 Loads the cached train (and val, for a quick check) feature arrays, fits the
 configured classifier, verifies its class order matches the canonical contract,
-and saves the model with metadata. Fast and fully re-runnable — this is what
+and saves the model with metadata. Fast and fully re-runnable - this is what
 the /train API endpoint calls.
 
 Experiment tracking: if an MLflow tracking server is configured (via
@@ -14,7 +14,7 @@ confusion matrix to the SAME run. After saving, the model file is also logged
 to that run and registered as a new version of config.REGISTERED_MODEL_NAME in
 the MLflow Model Registry, which is what the serving path (predict.py / the
 API) pulls from. If tracking is not configured or unreachable, training
-proceeds and the model is still saved locally — logging and registration are
+proceeds and the model is still saved locally - logging and registration are
 best-effort and never block a train.
 
 Examples:
@@ -68,7 +68,7 @@ def train() -> dict:
         metrics["val_f1_weighted"] = float(val_f1)
         print(f"📈 Validation weighted F1: {val_f1:.4f}")
     except FileNotFoundError:
-        print("ℹ️  No val features found — skipping val check.")
+        print("ℹ️  No val features found - skipping val check.")
 
     metrics["elapsed_sec"] = round(time.time() - t0, 1)
 
@@ -82,7 +82,7 @@ def train() -> dict:
     # Publish the saved model: attach the file to the training run and register
     # a new version in the MLflow Model Registry (best-effort, never raises).
     # The local save above already succeeded, so a failure here costs nothing.
-    # The tags are descriptive only — they say what this version IS, so a human
+    # The tags are descriptive only - they say what this version IS, so a human
     # can compare candidates. They do NOT promote it: serving follows the
     # PRODUCTION_ALIAS, which only scripts/promote.py moves.
     tracking.register_model(run_id, tags={

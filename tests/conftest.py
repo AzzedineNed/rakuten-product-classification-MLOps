@@ -60,7 +60,7 @@ def _isolate_mlflow_global_state():
 
     THREE pieces leak, all MEASURED rather than assumed:
 
-      1. mlflow.set_tracking_uri() does not only set a module global — it also
+      1. mlflow.set_tracking_uri() does not only set a module global - it also
          WRITES MLFLOW_TRACKING_URI INTO os.environ. So it beats the environment
          variable permanently, and monkeypatch.setenv/.delenv on that variable
          is inert in any later test in the same process.
@@ -71,7 +71,7 @@ def _isolate_mlflow_global_state():
          and the two must agree.
 
     Restoring by CALLING the setters does not work: with nothing previously set,
-    get_tracking_uri() returns a COMPUTED default (sqlite:///<cwd>/mlflow.db —
+    get_tracking_uri() returns a COMPUTED default (sqlite:///<cwd>/mlflow.db,
     NOT ./mlruns, verified on MLflow 3.14.0), and feeding that back turns an
     unset variable into a set one pointing at the repo root. So the snapshot is
     of the raw state, restored by assignment.
@@ -85,7 +85,7 @@ def _isolate_mlflow_global_state():
         import mlflow  # noqa: F401
         from mlflow.tracking import fluent
         from mlflow.tracking._tracking_service import utils
-    except ImportError:  # CI subset — mlflow absent, nothing global to restore
+    except ImportError:  # CI subset - mlflow absent, nothing global to restore
         yield
         return
 

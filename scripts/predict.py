@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""predict.py — Image-only inference.
+"""predict.py - Image-only inference.
 
 Image -> zoom/white-canvas preprocessing -> frozen MobileNetV2 -> classifier
 -> probability vector in CANONICAL order -> top-k labels.
@@ -8,8 +8,8 @@ Model loading (registry-first, local fallback):
   1. If MLFLOW_TRACKING_URI is set, the registered model
      (config.REGISTERED_MODEL_NAME) is downloaded from the MLflow Model
      Registry ONCE and cached in memory for the process lifetime. The version
-     chosen is the one carrying the config.PRODUCTION_ALIAS alias — set by
-     scripts/promote.py — or, if nothing has been promoted yet, the newest
+     chosen is the one carrying the config.PRODUCTION_ALIAS alias - set by
+     scripts/promote.py - or, if nothing has been promoted yet, the newest
      version (the pre-alias behaviour).
   2. If the registry is unreachable / empty / not configured, we fall back to
      the local .joblib (config.CLASSIFIER_PATH) with the existing mtime-keyed
@@ -86,7 +86,7 @@ def _load_payload():
             return _REGISTRY_PAYLOAD
         except Exception as exc:  # noqa: BLE001
             _REGISTRY_FAILED = True
-            print(f"⚠️  Registry unavailable ({type(exc).__name__}: {exc}) — "
+            print(f"⚠️  Registry unavailable ({type(exc).__name__}: {exc}) - "
                   f"falling back to local model.")
     payload = _load_local_payload()
     _SERVING_SOURCE = payload.get("serving_source", "local")
@@ -94,7 +94,7 @@ def _load_payload():
 
 
 def model_source() -> str:
-    """Where the currently served model came from ('registry:…', 'local:…'),
+    """Where the currently served model came from ('registry:...', 'local:...'),
     or 'not-loaded' before the first prediction. Used by the API's /health."""
     return _SERVING_SOURCE
 

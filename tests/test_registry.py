@@ -2,7 +2,7 @@
 
 This is the rule that answers "which model is used for prediction". It had NO
 test coverage until now, which is why these tests were written BEFORE the
-function moved to rakuten_common — they pin the existing behaviour so the move
+function moved to rakuten_common - they pin the existing behaviour so the move
 can be proved not to change it.
 
 Two layers, deliberately:
@@ -32,7 +32,7 @@ class _Version:
     """MLflow 3.14.0 returns ModelVersion.version as an INT on all three paths
     (create_model_version, search_model_versions, get_model_version_by_alias).
     Verified directly, not assumed. Older MLflow returned a string, so the
-    resolver must tolerate both — it does, via int() and f-strings — and these
+    resolver must tolerate both - it does, via int() and f-strings - and these
     tests coerce with str() so they do not encode either choice.
     """
 
@@ -42,7 +42,7 @@ class _Version:
 
 class FakeClient:
     """Minimal stand-in. Real MLflow raises MlflowException for a missing alias;
-    the resolver catches bare Exception, so the exact type does not matter — but
+    the resolver catches bare Exception, so the exact type does not matter - but
     it MUST raise rather than return None, which is what this fake reproduces.
     """
 

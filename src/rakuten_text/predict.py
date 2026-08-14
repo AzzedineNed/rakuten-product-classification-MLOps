@@ -33,13 +33,13 @@ class TfidfPredictor:
     def load(self, prefer_registry: bool = False) -> "TfidfPredictor":
         """Charge les artefacts.
 
-        prefer_registry=False (DEFAULT) — local disk only. This is what
+        prefer_registry=False (DEFAULT) - local disk only. This is what
         scripts/evaluate_text.py and scripts/tune_fusion_weight need: an
         evaluation must score the artifacts training just wrote, not whatever
         the registry currently serves, or the reported metrics describe a
         different model than the run they are attached to.
 
-        prefer_registry=True — registry first (production alias, else newest
+        prefer_registry=True - registry first (production alias, else newest
         version), local .pkl files as the fallback. Serving passes this; the
         chain NEVER hard-fails on a registry problem, it degrades to local and
         says so in serving_source.
@@ -59,7 +59,7 @@ class TfidfPredictor:
             except Exception as exc:  # noqa: BLE001
                 # Registry unreachable, unset, empty, or holding a malformed
                 # version. None of that is a reason to refuse to serve.
-                print(f"⚠️  Registry unavailable ({type(exc).__name__}: {exc}) — "
+                print(f"⚠️  Registry unavailable ({type(exc).__name__}: {exc}) - "
                       f"falling back to the local model.")
 
         if not self.vectorizer_path.exists():

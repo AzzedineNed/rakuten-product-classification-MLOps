@@ -3,7 +3,7 @@
 # WHAT IS SCRAPED
 #   The three FastAPI services, on the compose network, by service name. Their
 #   /metrics endpoints are NOT routed through nginx and no service publishes a
-#   host port, so metrics are reachable from inside the compose network only —
+#   host port, so metrics are reachable from inside the compose network only,
 #   which is the whole reason this file can use plain http with no auth.
 #
 # ONE JOB PER SERVICE, not one job with three targets. The `job` label is what
@@ -24,13 +24,13 @@
 # But rakuten_model_info ALREADY carries its own `modality` label, and when a
 # target label collides with a label the application exported, Prometheus keeps
 # the target's and RENAMES the application's to `exported_modality`. The result
-# was a dashboard table showing both columns, and — worse — any query grouping
+# was a dashboard table showing both columns, and - worse - any query grouping
 # by `modality` silently grouping by the scrape label instead of the app's.
 # Observed live before it was removed. `job` already distinguishes the three
 # targets, so the label bought nothing and cost correctness.
 #
 # EDITING THIS FILE: it is bind-mounted read-only, and Prometheus does NOT pick
-# up changes on its own — exactly like nginx/default.conf (known wart 1). After
+# up changes on its own - exactly like nginx/default.conf (known wart 1). After
 # editing, run:  sudo docker compose restart prometheus
 
 global:

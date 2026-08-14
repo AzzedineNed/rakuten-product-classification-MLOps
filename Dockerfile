@@ -1,4 +1,4 @@
-# CPU image — the frozen-backbone pipeline doesn't need a GPU.
+# CPU image - the frozen-backbone pipeline doesn't need a GPU.
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -12,7 +12,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libjpeg62-turbo libpng16-16 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install CPU PyTorch first (kept out of requirements.txt — hardware specific).
+# Install CPU PyTorch first (kept out of requirements.txt - hardware specific).
 RUN pip install torch==2.2.2 torchvision==0.17.2 \
     --index-url https://download.pytorch.org/whl/cpu
 

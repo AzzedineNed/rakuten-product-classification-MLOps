@@ -71,7 +71,7 @@ def login(username: str, password: str):
     # Django issues a 'sessionid' cookie only on a successful login.
     if "sessionid" not in session.cookies.get_dict():
         raise RuntimeError(
-            "Login failed — check ENS_USERNAME / ENS_PASSWORD. "
+            "Login failed - check ENS_USERNAME / ENS_PASSWORD. "
             "(No session cookie was issued.)"
         )
     print("🔐 Logged in to ENS Challenge Data.")

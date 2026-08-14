@@ -7,7 +7,7 @@ the API stack, none of which the test suite imports.
 
 A subset is only trustworthy if it cannot drift. If somebody bumps a version in
 requirements.txt and forgets the CI file, CI would go on testing a version the
-project no longer installs — a green build that means nothing. This script makes
+project no longer installs - a green build that means nothing. This script makes
 that failure loud and immediate.
 
 Checks:
@@ -76,7 +76,7 @@ def main() -> int:
             )
 
     if problems:
-        print("CI PIN DRIFT — requirements-ci.txt disagrees with requirements.txt:")
+        print("CI PIN DRIFT - requirements-ci.txt disagrees with requirements.txt:")
         print("\n".join(problems))
         print(
             "\nFix: make the two files agree. requirements.txt is the source of "

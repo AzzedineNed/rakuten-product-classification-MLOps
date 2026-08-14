@@ -1,4 +1,4 @@
-"""Rakuten image pipeline — end-to-end training orchestration.
+"""Rakuten image pipeline - end-to-end training orchestration.
 
     collect_guard --> process_guard --> train --> evaluate
 
@@ -10,7 +10,7 @@ WHAT THIS DAG DOES NOT DO: promote.
     The evaluate task prints a comparison so a human can decide.
 
 HOW IT TALKS TO THE MODEL:
-    Over HTTP, through nginx, with basic auth — as an ordinary external client.
+    Over HTTP, through nginx, with basic auth - as an ordinary external client.
     No docker.sock, no shared network with the serving stack. The Airflow image
     stays vanilla: no torch, no scikit-learn, no dataset processing here.
 
@@ -20,7 +20,7 @@ WHY THE GUARDS ARE NOT ShortCircuitOperator:
     still run train and evaluate. So the guards are plain PythonOperators that
     inspect state, log what they found, and push a decision to XCom. The
     "skipping" of the expensive feature-extraction step happens where it
-    actually lives — in the reprocess flag passed to POST /train.
+    actually lives - in the reprocess flag passed to POST /train.
 
 DATA VISIBILITY:
     ./data is mounted READ-ONLY at /opt/airflow/rakuten-data. The guards stat()
@@ -39,7 +39,7 @@ from airflow.exceptions import AirflowException
 from airflow.providers.standard.operators.python import PythonOperator
 
 # --------------------------------------------------------------------------- #
-# Configuration — all from the environment (airflow/.env.airflow)
+# Configuration - all from the environment (airflow/.env.airflow)
 # --------------------------------------------------------------------------- #
 API_BASE = os.getenv("RAKUTEN_API_BASE_URL", "http://host.docker.internal").rstrip("/")
 API_USER = os.getenv("RAKUTEN_API_USER", "admin")
@@ -90,7 +90,7 @@ def _post(path: str, params: dict | None = None) -> dict:
     if resp.status_code == 409:
         raise AirflowException(
             f"409 from {url}: {resp.text}. /train and /evaluate are mutually "
-            f"exclusive — another job is already running on the API."
+            f"exclusive - another job is already running on the API."
         )
     if resp.status_code >= 400:
         raise AirflowException(f"{resp.status_code} from {url}: {resp.text}")
@@ -127,7 +127,7 @@ def _poll(status_path: str, timeout_s: int, label: str) -> dict:
         if state == "idle":
             # The job finished and something reset it, or it never started.
             raise AirflowException(
-                f"{label} reported 'idle' while being polled — the job did not run. "
+                f"{label} reported 'idle' while being polled - the job did not run. "
                 f"Check the api container logs."
             )
         time.sleep(POLL_INTERVAL_S)
@@ -159,11 +159,11 @@ def collect_guard(**_) -> bool:
         raise AirflowException(
             f"Neither the raw dataset ({RAW_DIR}) nor cached features exist, so "
             f"there is nothing to train on. Run `python scripts/collect.py` (or "
-            f"`dvc pull`) on the host first — this DAG will not download 2.2 GB "
+            f"`dvc pull`) on the host first - this DAG will not download 2.2 GB "
             f"for you."
         )
     if not raw_present:
-        print("Raw data absent but cached features exist — training can proceed.")
+        print("Raw data absent but cached features exist - training can proceed.")
     return raw_present
 
 
@@ -189,7 +189,7 @@ def process_guard(ti=None, **_) -> bool:
     if not (RAW_DIR.exists() and any(RAW_DIR.iterdir())):
         raise AirflowException(
             f"Features are missing and the raw dataset is not there either "
-            f"({RAW_DIR}) — reprocessing is impossible."
+            f"({RAW_DIR}) - reprocessing is impossible."
         )
     return True
 
@@ -211,7 +211,7 @@ def train(ti=None, **_) -> dict:
 
 
 def evaluate(ti=None, **_) -> dict:
-    """POST /evaluate, poll, and report — without promoting anything."""
+    """POST /evaluate, poll, and report - without promoting anything."""
     print(f"Starting evaluation against {API_BASE}")
     started = _post("/evaluate")
     print(f"API accepted the job: {started}")
@@ -221,7 +221,7 @@ def evaluate(ti=None, **_) -> dict:
 
     train_metrics = ti.xcom_pull(task_ids="train") or {}
     print("=" * 70)
-    print("RUN COMPLETE — a new model version was registered and NOT promoted.")
+    print("RUN COMPLETE - a new model version was registered and NOT promoted.")
     print(f"  train/val metrics : {train_metrics}")
     print(f"  test metrics      : {metrics}")
     print("")

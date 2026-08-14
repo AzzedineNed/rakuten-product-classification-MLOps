@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""process.py — Turn raw data into cached feature vectors.
+"""process.py - Turn raw data into cached feature vectors.
 
 Steps:
   1. Load + merge raw CSVs.
@@ -7,7 +7,7 @@ Steps:
   3. For each split: load each image, run the zoom/white-canvas preprocessing,
      push through the frozen MobileNetV2 backbone, and save the 1280-d feature
      vectors to RAW .npy files immediately (X_<split>_raw.npy). Processed images
-     are NOT written to disk — we go straight to features, saving ~2.2 GB.
+     are NOT written to disk - we go straight to features, saving ~2.2 GB.
   4. Build the final train set by resampling the raw train features to balance
      classes (~RESAMPLE_TARGET each), using row indices + a memory-mapped read so
      RAM stays low. val/test final files are copies of their raw features.
@@ -79,7 +79,7 @@ def _extract_and_save_raw(split_df, name: str) -> int:
     rx, ry = config.feature_files_raw(name)
     if rx.exists() and ry.exists():
         n = len(np.load(ry, mmap_mode="r"))
-        print(f"⏭️  {name}: raw features already cached ({n:,}) — skipping extraction")
+        print(f"⏭️  {name}: raw features already cached ({n:,}) - skipping extraction")
         return n
 
     X, y, skipped = _features_for_split(split_df, desc=f"features:{name}")
@@ -93,8 +93,8 @@ def _extract_and_save_raw(split_df, name: str) -> int:
 def process(limit: int = 0) -> dict:
     """Extract & cache features for train/val/test, then finalize (resample train,
     copy val/test). Returns the features-metadata dict (identical to what is
-    written to features_meta.json) so a caller — the API, or a future orchestrator
-    — can consume the run result instead of re-reading the file.
+    written to features_meta.json) so a caller, the API or a future
+    orchestrator, can consume the run result instead of re-reading the file.
 
     `limit` mirrors the --limit CLI flag: if >0, use only a stratified subset.
     """

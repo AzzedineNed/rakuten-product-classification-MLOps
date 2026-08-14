@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FastAPI GATEWAY — combines the image and text models into one prediction.
+"""FastAPI GATEWAY - combines the image and text models into one prediction.
 
 Endpoints:
   GET  /health    liveness of the gateway AND of both upstream services
@@ -250,7 +250,7 @@ async def predict(
     # Recorded AFTER `degraded` is decided, so the label is the truth about
     # this response. `modalities` is the set that actually contributed, which
     # is what makes "how often are we silently serving one modality?"
-    # answerable — the question the degradation design exists to expose.
+    # answerable - the question the degradation design exists to expose.
     METRICS.observe_fusion(vectors.keys(), fused=len(vectors) > 1,
                            degraded=bool(errors))
     METRICS.observe_prediction(top[0]["prdtypecode"], top[0]["probability"])

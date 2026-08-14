@@ -79,7 +79,7 @@ def main() -> int:
     print("    (informational -- this is the gap A2 exists to close)")
 
     print("\n" + ("=" * 62))
-    print("RESULT:", "IDENTICAL — safe to rewire" if ok else "MISMATCH — DO NOT PROCEED")
+    print("RESULT:", "IDENTICAL - safe to rewire" if ok else "MISMATCH - DO NOT PROCEED")
     print("=" * 62)
     return 0 if ok else 1
 

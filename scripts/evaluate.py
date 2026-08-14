@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""evaluate.py — Evaluate the trained classifier on the cached test features.
+"""evaluate.py - Evaluate the trained classifier on the cached test features.
 
 Produces (in reports/):
   * metrics.json            weighted/macro F1 + accuracy
@@ -92,8 +92,8 @@ def evaluate() -> dict:
 
 def _plot_confusion(y_true, y_pred, labels, target_names):
     """Save an annotated confusion matrix with two panels:
-      * left  — raw counts (zeros left blank to cut clutter)
-      * right — row-normalized, i.e. each row sums to 1 so the diagonal is the
+      * left  - raw counts (zeros left blank to cut clutter)
+      * right - row-normalized, i.e. each row sums to 1 so the diagonal is the
                 per-class recall; this is what actually reveals which classes
                 bleed into which.
 
@@ -139,7 +139,7 @@ def _plot_confusion(y_true, y_pred, labels, target_names):
     _draw(ax_n, cm_norm, "Row-normalized (diagonal = recall)", ".2f",
           vmax=1.0, annotate_above=0.005)
 
-    fig.suptitle("Confusion Matrix — image model", fontsize=14)
+    fig.suptitle("Confusion Matrix - image model", fontsize=14)
     fig.tight_layout()
     out = config.REPORTS_DIR / "confusion_matrix.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")

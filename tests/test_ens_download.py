@@ -1,4 +1,4 @@
-"""Tests for the ENS downloader's parsing helpers. No network access — we only
+"""Tests for the ENS downloader's parsing helpers. No network access - we only
 exercise the pure string parsing (CSRF token + Content-Disposition filename).
 """
 import pytest
