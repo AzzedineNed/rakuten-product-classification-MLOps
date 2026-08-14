@@ -13,15 +13,13 @@ here and in CI, models/classifier.joblib present on the developer's laptop, and
 MLFLOW_TRACKING_URI set there too. So config.CLASSIFIER_PATH is forced in both
 directions rather than accepted as found.
 
-WHAT IS PINNED HERE IS NOT ALL DESIRABLE. Two known warts are asserted on
-purpose, so that fixing either one fails a test and forces the decision to be
-deliberate:
+WHAT IS PINNED HERE IS NOT ALL DESIRABLE. A known wart is asserted on purpose,
+so that fixing it fails a test and forces the decision to be deliberate:
   * /health reports model_loaded from the LOCAL joblib, not from what is being
     served. The text service does this correctly; the two disagree.
-  * The background runners catch `except Exception`, which does NOT include
-    SystemExit, so a sys.exit inside a job wedges the status on "running"
-    forever. api/text_main.py catches SystemExit explicitly as of session 11;
-    this service still does not.
+  * /health's model_loaded, above, is the only one left. The SystemExit gap
+    this file used to pin was fixed in the same session: both runners now
+    catch it by name, like api/text_main.py.
 
 COUNTERS ARE ASSERTED AS DELTAS. ServiceMetrics lives for the whole process,
 so absolute values pass alone and fail in a full run.
@@ -548,44 +546,42 @@ def test_a_finished_job_does_not_block_the_next_one(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# The SystemExit gap - CHARACTERIZATION, not endorsement
+# SystemExit does not derive from Exception, so it is caught by name
 # --------------------------------------------------------------------------- #
-def test_systemexit_escapes_a_background_job_and_wedges_it(monkeypatch):
-    """PINS A KNOWN GAP. SystemExit does not derive from Exception, so the
-    `except Exception` in these runners does not catch it: the job dies and the
-    status stays "running" forever, and the DAG's poller can only report a
-    timeout hours later.
+def test_systemexit_in_an_evaluation_job_is_reported_not_fatal(monkeypatch):
+    """A background job that calls sys.exit must land in the status dict.
 
-    Unreachable in practice today because the runners call the library
-    functions rather than main(), so argparse is never involved. It is reachable
-    the moment anything in that call tree calls sys.exit. api/text_main.py
-    catches SystemExit explicitly as of session 11; this service does not, and
-    the two behave differently.
+    SystemExit inherits from BaseException, not Exception, so a bare
+    `except Exception` lets it through: the task dies, the status stays
+    "running" forever, and the DAG's poller can only report a timeout hours
+    later. Unreachable today because the runners call the library functions
+    rather than main(), which keeps argparse out of the path, but it is one
+    sys.exit away at any time. api/text_main.py has caught it explicitly since
+    session 11 and this service now matches.
 
-    Called directly rather than through the client: an exception raised in a
-    background task would otherwise propagate out of TestClient itself.
+    Called directly rather than through the client, because an exception raised
+    in a background task would otherwise propagate out of TestClient itself.
     """
     calls: list[str] = []
     _fake_script(monkeypatch, "evaluate", "evaluate", calls, outcome=SystemExit(2))
 
-    with pytest.raises(SystemExit):
-        im._run_evaluation()
+    im._run_evaluation()
 
-    assert im._EVAL_STATUS["state"] == "running"
+    assert im._EVAL_STATUS["state"] == "failed"
+    assert "SystemExit" in im._EVAL_STATUS["detail"]
 
 
-def test_systemexit_escapes_the_training_job_too(monkeypatch):
+def test_systemexit_in_a_training_job_is_reported_not_fatal(monkeypatch):
     calls: list[str] = []
     _fake_script(monkeypatch, "train", "train", calls, outcome=SystemExit(2))
 
-    with pytest.raises(SystemExit):
-        im._run_training(False)
+    im._run_training(False)
 
-    assert im._TRAIN_STATUS["state"] == "running"
+    assert im._TRAIN_STATUS["state"] == "failed"
+    assert "SystemExit" in im._TRAIN_STATUS["detail"]
 
 
-def test_a_plain_exception_is_still_caught(monkeypatch):
-    """The contrast that makes the gap above a gap and not a policy."""
+def test_a_plain_exception_is_caught_too(monkeypatch):
     calls: list[str] = []
     _fake_script(monkeypatch, "train", "train", calls, outcome=ValueError("bad shape"))
 
@@ -593,6 +589,18 @@ def test_a_plain_exception_is_still_caught(monkeypatch):
 
     assert im._TRAIN_STATUS["state"] == "failed"
     assert "bad shape" in im._TRAIN_STATUS["detail"]
+
+
+def test_the_failure_detail_names_the_exception_type(monkeypatch):
+    """Both services format the detail the same way now. "no test features" on
+    its own does not say whether the job crashed or exited."""
+    calls: list[str] = []
+    _fake_script(monkeypatch, "evaluate", "evaluate", calls,
+                 outcome=FileNotFoundError("no test features"))
+
+    im._run_evaluation()
+
+    assert im._EVAL_STATUS["detail"].startswith("FileNotFoundError: ")
 
 
 # --------------------------------------------------------------------------- #

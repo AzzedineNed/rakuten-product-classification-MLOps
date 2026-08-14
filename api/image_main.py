@@ -133,8 +133,14 @@ def _run_training(reprocess: bool) -> None:
         import train as train_script
         metrics = train_script.train()
         _TRAIN_STATUS.update(state="done", metrics=metrics, detail="completed")
-    except Exception as exc:  # noqa: BLE001
-        _TRAIN_STATUS.update(state="failed", detail=str(exc))
+    except (Exception, SystemExit) as exc:  # noqa: BLE001
+        # SystemExit is caught EXPLICITLY because it does not derive from
+        # Exception. Calling the library functions rather than main() keeps
+        # argparse out of this path, but any sys.exit anywhere in the call tree
+        # would otherwise kill the background task silently and wedge the
+        # status on "running" forever, which the DAG can only report as a
+        # timeout hours later. Same guard as api/text_main.py.
+        _TRAIN_STATUS.update(state="failed", detail=f"{type(exc).__name__}: {exc}")
 
 
 @app.post("/train")
@@ -170,8 +176,8 @@ def _run_evaluation() -> None:
         # status on "running" forever. Same trap as process.main() above.
         metrics = evaluate_script.evaluate()
         _EVAL_STATUS.update(state="done", metrics=metrics, detail="completed")
-    except Exception as exc:  # noqa: BLE001
-        _EVAL_STATUS.update(state="failed", detail=str(exc))
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 - see _run_training
+        _EVAL_STATUS.update(state="failed", detail=f"{type(exc).__name__}: {exc}")
 
 
 @app.post("/evaluate")
