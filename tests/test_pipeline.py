@@ -90,6 +90,24 @@ def test_classifier_roundtrip_and_reorder(tmp_path):
     assert loaded["backbone"] == config.BACKBONE_NAME
 
 
+def test_logreg_head_passes_no_arguments_scikit_learn_has_removed():
+    """Guards the fix for the pin that used to be load-bearing.
+
+    build_classifier once passed multi_class="multinomial" and n_jobs=-1. Both
+    were MEASURED to be no-ops on scikit-learn 1.4.2 (identical coefficients,
+    intercepts, n_iter_ and predict_proba), and both are gone or going in newer
+    releases: multi_class was removed outright, and n_jobs has had no effect
+    since 1.8 and is scheduled for removal in 1.10.
+
+    Written with getattr defaults so it runs on either side of that change: CI
+    installs 1.4.2, where the attributes still exist and carry their defaults,
+    and it is on 1.4.2 that a reintroduction would otherwise pass unnoticed.
+    """
+    clf = classifier.build_classifier("logreg")
+    assert getattr(clf, "multi_class", "auto") == "auto"
+    assert getattr(clf, "n_jobs", None) is None
+
+
 def test_fusion_weighted_average():
     a = np.zeros(config.NUM_CLASSES)
     b = np.zeros(config.NUM_CLASSES)

@@ -194,14 +194,19 @@ pip install -r requirements.txt
 Run the tests (need neither torch nor data):
 
 ```bash
-make test             # 79 tests
+make test             # 248 tests
 ```
 
-> **Pins are load-bearing.** `numpy` stays `<2` because torch 2.2.2 requires it,
-> and `scikit-learn==1.4.2` is required because `classifier.py` passes
-> `multi_class=` to `LogisticRegression`, which newer versions removed. On
-> scikit-learn 1.9 the suite fails with `TypeError: ... unexpected keyword
-> argument 'multi_class'`. Fix the source before moving that pin.
+> **Pins are load-bearing, but only one of them is forced.** `numpy` stays `<2`
+> because torch 2.2.2 requires it, and that one cannot move. `scikit-learn==1.4.2`
+> and `scipy==1.17.1` are pinned for REPRODUCIBILITY: the shipped models were
+> fitted by that pair, and a solver or estimator change would move every metric
+> derived from them without any change to our own code. Moving them is now a
+> decision, not a breakage. It used to be a trap: `classifier.py` passed
+> `multi_class=` and `n_jobs=` to `LogisticRegression`, both removed or going in
+> newer releases, so the suite failed outright on scikit-learn 1.9 with
+> `TypeError: ... unexpected keyword argument 'multi_class'`. Both arguments were
+> measured to be no-ops on 1.4.2 and deleted; the suite passes on 1.9.0.
 
 ---
 

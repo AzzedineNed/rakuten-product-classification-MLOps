@@ -16,9 +16,9 @@ WHY NOT prometheus-fastapi-instrumentator
     fastapi==0.111.0 (pip reports the conflict only AFTER performing it).
     Version 7.0.0 is compatible, but it would couple the project's
     fastapi/starlette pins to a third-party release cycle, and this repo already
-    carries one load-bearing pin it cannot move (scikit-learn 1.4.2, see the
-    multi_class= wart). prometheus-client has ZERO dependencies and therefore
-    cannot disturb any pin, ever. The metrics that actually matter here
+    carries a pin it genuinely cannot move (numpy <2, required by torch 2.2.2).
+    prometheus-client has ZERO dependencies and therefore cannot disturb any
+    pin, ever. The metrics that actually matter here
     (per-class prediction counts, which model is serving, fusion degradation)
     are custom and no instrumentator would supply them.
 

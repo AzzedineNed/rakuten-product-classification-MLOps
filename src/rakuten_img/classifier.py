@@ -31,11 +31,20 @@ def build_classifier(kind: Optional[str] = None):
     """Instantiate the configured classifier head."""
     kind = (kind or config.CLASSIFIER_TYPE).lower()
     if kind == "logreg":
+        # No multi_class= and no n_jobs= argument, both MEASURED to be no-ops
+        # on the pinned scikit-learn 1.4.2: coefficients, intercepts, n_iter_
+        # and predict_proba are bit-identical with and without them.
+        #   multi_class="multinomial" - the default "auto" already resolves to
+        #     multinomial for a multi-class problem on the lbfgs solver. The
+        #     argument was REMOVED in newer scikit-learn, and passing it there
+        #     is a TypeError, which is what pinned this project to 1.4.2.
+        #   n_jobs=-1 - only ever parallelised the one-vs-rest path, so it did
+        #     nothing under multinomial. It has had no effect since 1.8 and is
+        #     scheduled for removal in 1.10; it would have become the next
+        #     TypeError the moment the pin moved.
         return LogisticRegression(
             C=1.0,
             max_iter=1000,
-            n_jobs=-1,
-            multi_class="multinomial",
             random_state=config.RANDOM_STATE,
         )
     if kind == "mlp":

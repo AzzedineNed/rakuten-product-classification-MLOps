@@ -33,13 +33,18 @@
 # EVERY PIN HERE MUST MATCH requirements.txt EXACTLY.
 # scripts/check_ci_pins.py enforces that and CI runs it before installing.
 #
-# scikit-learn==1.4.2 is LOAD-BEARING, not cosmetic: rakuten_img.classifier
-# passes multi_class= to LogisticRegression, which was removed in newer
-# scikit-learn. On 1.9.0 the suite fails with
+# scikit-learn==1.4.2 is a REPRODUCIBILITY pin, not a forced one. It used to be
+# forced: rakuten_img.classifier passed multi_class= and n_jobs= to
+# LogisticRegression, and on 1.9.0 the suite failed with
 #   TypeError: LogisticRegression.__init__() got an unexpected keyword
 #   argument 'multi_class'
-# in tests/test_pipeline.py::test_classifier_roundtrip_and_reorder.
-# Unpinning this turns CI red. Fix the source first, then move the pin.
+# in tests/test_pipeline.py::test_classifier_roundtrip_and_reorder. Both
+# arguments were MEASURED to be no-ops on 1.4.2 and removed, and the whole suite
+# now passes on scikit-learn 1.9.0 with no warnings.
+# It stays pinned because the shipped models were fitted by this version and an
+# estimator change would move their metrics with no change to our own code, the
+# same reason scipy is pinned. Moving it is now a decision, not a breakage, and
+# it means retraining and re-recording the numbers.
 # ---------------------------------------------------------------------------
 
 numpy==1.26.4
