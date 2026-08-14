@@ -606,9 +606,11 @@ ever disagree on a version — a subset is only trustworthy if it cannot drift.
 - **The MLP's internal "Validation score" during training is optimistic** — it is
   measured on a slice of the *resampled* train set. The number that counts is
   weighted F1 on the untouched val/test splits.
-- **`/health` reports `model_loaded` from the local joblib's existence**, which is
-  unrelated to what is actually served. Fixing it would change the API response
-  contract.
+- **`/health`'s `model_loaded` means a model is resolved and serving**, the same
+  thing it means on the text service. It used to report the local joblib's mere
+  existence, which was unrelated to what was served; that value is still
+  available as `local_model_present`, which is what you want when a registry
+  fetch has failed and the fallback is what is running.
 - **`model_source` reads `not-loaded` until the first `/predict`** (lazy torch
   import), so a freshly restarted image container looks unloaded but is healthy.
 - **nginx keeps a stale backend IP after `docker compose up --build`.** Recreating

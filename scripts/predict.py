@@ -21,7 +21,8 @@ Model loading (registry-first, local fallback):
 Exposes reusable functions (used by the API and importable by a fusion layer):
   * predict_proba(pil_image) -> np.ndarray of shape (NUM_CLASSES,) in canonical order
   * predict(image_path, top_k) -> list of {code, label, probability}
-  * model_source() -> where the served model came from (registry/local/none yet)
+  * model_source() -> where the served model came from (registry/local), or
+    NOT_LOADED before anything has been resolved
 
 CLI:
   python scripts/predict.py --image path/to/product.jpg
@@ -44,7 +45,12 @@ from rakuten_img import backbone, classifier, config, images, tracking
 # a dead server on every request once the fallback has kicked in.
 _REGISTRY_PAYLOAD: dict | None = None
 _REGISTRY_FAILED: bool = False
-_SERVING_SOURCE: str = "not-loaded"  # updated by _load_payload()
+# The sentinel is a module constant so the API can compare against it by name
+# instead of repeating the string. api/image_main.py reads it to answer
+# /health's model_loaded.
+NOT_LOADED = "not-loaded"
+
+_SERVING_SOURCE: str = NOT_LOADED  # updated by _load_payload()
 
 
 @lru_cache(maxsize=1)

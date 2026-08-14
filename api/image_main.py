@@ -2,7 +2,7 @@
 """FastAPI service exposing the IMAGE model.
 
 Endpoints:
-  GET  /health          liveness + whether a model is loaded
+  GET  /health          liveness, what is being served, local artifact state
   POST /predict         multipart image upload -> top-k + full canonical proba
   POST /train           retrain the classifier head from cached features
                         (background task; optional ?reprocess=true to re-extract
@@ -70,17 +70,32 @@ def metrics():
 
 @app.get("/health")
 def health():
+    """Liveness, plus what this service is actually serving.
+
+    model_loaded used to be config.CLASSIFIER_PATH.exists(), which answered a
+    different question: whether a joblib happens to sit on this container's
+    disk. A container serving a model pulled from the registry, with no local
+    copy, reported false while answering predictions correctly, and one with a
+    stale or corrupt joblib reported true. It now means what it means on the
+    text service: a model is resolved and serving.
+
+    The old value is kept as local_model_present rather than dropped. It is the
+    honest answer to "is there a local artifact here", which is worth knowing
+    when a registry fetch has failed and the fallback is what is running.
+
+    This service resolves its model LAZILY, so model_loaded is false on a fresh
+    container until the first /predict. That is a real property of the design,
+    not an error, and it is why model_source is published from here as well as
+    after a prediction: whichever happens first, the gauge stops being empty.
+    """
     import predict as predict_script  # scripts/predict.py
 
-    model_present = config.CLASSIFIER_PATH.exists()
     source = predict_script.model_source()
-    # Published here as well as after a prediction because this service
-    # resolves its model lazily (model_source() reads "not-loaded" until the
-    # first /predict — a documented wart). Whichever happens first, the gauge
-    # stops being empty.
     METRICS.set_model_info("image", source)
-    return {"status": "ok", "model_loaded": model_present,
+    return {"status": "ok",
+            "model_loaded": source != predict_script.NOT_LOADED,
             "model_source": source,
+            "local_model_present": config.CLASSIFIER_PATH.exists(),
             "backbone": config.BACKBONE_NAME, "num_classes": config.NUM_CLASSES}
 
 

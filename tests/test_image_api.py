@@ -13,13 +13,13 @@ here and in CI, models/classifier.joblib present on the developer's laptop, and
 MLFLOW_TRACKING_URI set there too. So config.CLASSIFIER_PATH is forced in both
 directions rather than accepted as found.
 
-WHAT IS PINNED HERE IS NOT ALL DESIRABLE. A known wart is asserted on purpose,
-so that fixing it fails a test and forces the decision to be deliberate:
-  * /health reports model_loaded from the LOCAL joblib, not from what is being
-    served. The text service does this correctly; the two disagree.
-  * /health's model_loaded, above, is the only one left. The SystemExit gap
-    this file used to pin was fixed in the same session: both runners now
-    catch it by name, like api/text_main.py.
+WHAT THIS FILE USED TO PIN, AND NO LONGER DOES. Two known warts were asserted
+here as characterization first, then fixed once the tests made the current
+behaviour explicit: /health's model_loaded, which described the local joblib
+rather than the served model, and the background runners' `except Exception`,
+which let SystemExit wedge a job on "running". Both now match api/text_main.py.
+The remaining asymmetry is deliberate: this service resolves its model LAZILY,
+so model_loaded is false until the first /predict.
 
 COUNTERS ARE ASSERTED AS DELTAS. ServiceMetrics lives for the whole process,
 so absolute values pass alone and fail in a full run.
@@ -147,7 +147,7 @@ def test_health_reports_the_static_service_facts(monkeypatch, tmp_path):
     assert body["num_classes"] == N
 
 
-def test_health_says_loaded_when_the_local_joblib_is_there(monkeypatch, tmp_path):
+def test_health_says_loaded_once_a_model_is_resolved(monkeypatch, tmp_path):
     artifact = tmp_path / "classifier.joblib"
     artifact.write_bytes(b"not a real model, only its presence is read")
     monkeypatch.setattr(config, "CLASSIFIER_PATH", artifact)
@@ -157,27 +157,28 @@ def test_health_says_loaded_when_the_local_joblib_is_there(monkeypatch, tmp_path
 
     assert body["model_loaded"] is True
     assert body["model_source"] == "local:classifier.joblib"
+    assert body["local_model_present"] is True
 
 
-def test_health_says_not_loaded_when_the_local_joblib_is_missing(monkeypatch, tmp_path):
+def test_health_says_not_loaded_before_anything_is_resolved(monkeypatch, tmp_path):
+    """This service resolves lazily, so a fresh container reports false until
+    the first /predict. That is the design, not a fault."""
     monkeypatch.setattr(config, "CLASSIFIER_PATH", tmp_path / "gone.joblib")
-    monkeypatch.setattr(predict_script, "model_source", lambda: "not-loaded")
+    monkeypatch.setattr(predict_script, "model_source",
+                        lambda: predict_script.NOT_LOADED)
     with _client() as client:
         body = client.get("/health").json()
 
     assert body["model_loaded"] is False
     assert body["model_source"] == "not-loaded"
+    assert body["local_model_present"] is False
 
 
-def test_model_loaded_describes_the_disk_not_the_served_model(monkeypatch, tmp_path):
-    """PINS A KNOWN WART, it does not endorse it.
+def test_model_loaded_describes_the_served_model_not_the_disk(monkeypatch, tmp_path):
+    """A container serving from the registry with no local artifact IS loaded.
 
-    model_loaded is config.CLASSIFIER_PATH.exists(). A container serving a
-    model pulled from the registry, with no local .joblib at all, reports
-    model_loaded false while answering predictions correctly. api/text_main.py
-    reports predictor.is_loaded instead, which is the right answer, so the two
-    services disagree. Fixing this changes the API response contract, so it is
-    a deliberate decision and this test is where it gets made.
+    Under the old behaviour this reported false, because model_loaded was
+    CLASSIFIER_PATH.exists(). It now means what it means on the text service.
     """
     monkeypatch.setattr(config, "CLASSIFIER_PATH", tmp_path / "no-local-copy.joblib")
     monkeypatch.setattr(predict_script, "model_source",
@@ -186,7 +187,23 @@ def test_model_loaded_describes_the_disk_not_the_served_model(monkeypatch, tmp_p
         body = client.get("/health").json()
 
     assert body["model_source"].startswith("registry:")
+    assert body["model_loaded"] is True
+    assert body["local_model_present"] is False
+
+
+def test_a_local_artifact_alone_does_not_mean_a_model_is_serving(monkeypatch, tmp_path):
+    """The other half of the same correction: a joblib on disk that nothing has
+    loaded, and may never load if it is corrupt, is not a served model."""
+    artifact = tmp_path / "classifier.joblib"
+    artifact.write_bytes(b"could be anything, nobody has opened it")
+    monkeypatch.setattr(config, "CLASSIFIER_PATH", artifact)
+    monkeypatch.setattr(predict_script, "model_source",
+                        lambda: predict_script.NOT_LOADED)
+    with _client() as client:
+        body = client.get("/health").json()
+
     assert body["model_loaded"] is False
+    assert body["local_model_present"] is True
 
 
 def test_health_publishes_which_model_is_serving(monkeypatch, tmp_path):
