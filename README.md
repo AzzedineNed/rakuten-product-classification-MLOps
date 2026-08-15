@@ -158,7 +158,25 @@ down here because a convention nobody wrote down is how the drift happened:
    and contain no `if __name__ == "__main__"` block.
 2. **`scripts/` holds every entrypoint, for every modality.** Anything you run
    is `python scripts/<something>.py`, never `python -m <package>.<module>`.
-3. **One `tracking.py` per modality** for all MLflow code.
+3. **One `tracking.py` per modality** for all MLflow code, with one stated
+   exception: `scripts/promote.py`. It is the only file outside those two
+   modules that imports MLflow, and it stays that way deliberately. Promotion
+   acts on the registry itself rather than on either model, and `--list`
+   reports both registered models, so no per-modality module can honestly own
+   it: putting the import in `rakuten_img/tracking.py` would make an image
+   module the home of an operation that also moves the text model's alias.
+   Naming the exception here is more honest than hiding it behind a module
+   that does not really own it.
+
+   The import sits inside `_client()` rather than at module top level, and
+   that is load-bearing, not style. The CI subset does not install MLflow, and
+   `tests/test_promote.py` imports the script at collection time, so hoisting
+   the import would skip that whole file in CI rather than just its
+   MLflow-dependent tests. Leave it where it is.
+
+   `promote.py` also imports `rakuten_text.config`, for the text model's name
+   in `--list`. That is rule 2 working as intended and not a second exception:
+   `scripts/` holds every entrypoint for every modality.
 4. **One Makefile target per task per modality.**
 5. **Anything both modalities need lives in `rakuten_common/`**, which is why
    `split_fingerprint` is there and not in a text module.
