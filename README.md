@@ -232,15 +232,15 @@ rakuten-image-mlops/
 │   └── gen_dashboard.py       # generates + validates the Grafana dashboard JSON
 │
 ├── api/image_main.py          # FastAPI :8000  /predict /train /evaluate /health
-├── api/text_main.py           # FastAPI :8001  /predict /predict/batch /health
+├── api/text_main.py           # FastAPI :8001  /predict /predict/batch /train /evaluate /health
 ├── api/gateway_main.py        # FastAPI :8002  /predict (fusion) /health
 ├── nginx/default.conf         # the only public entrypoint
 ├── prometheus/prometheus.yml  # scrape config (bind-mounted, needs a restart to reload)
 ├── grafana/provisioning/      # datasource + dashboard provider, read-only
 ├── grafana/dashboards/        # dashboard JSON, versioned here not in Grafana's DB
-├── airflow/dags/              # rakuten_image_pipeline
+├── airflow/dags/              # rakuten_image_pipeline + rakuten_text_pipeline
 ├── .github/workflows/tests.yml
-├── tests/                     # 79 tests, torch-free and data-free
+├── tests/                     # torch-free and data-free (count not stated on purpose)
 └── requirements.txt  requirements-ci.txt  pytest.ini  Dockerfile  docker-compose*.yml  Makefile
 ```
 
@@ -388,7 +388,8 @@ the `proxy_pass` target.
 
 `/text`, `/fusion`, `/grafana` and `/prometheus` without the trailing slash
 301-redirect to the slashed form. Basic auth guards `/train`, `/train/status`,
-`/evaluate`, `/evaluate/status` and `/prometheus/`. Rate limits are per-IP:
+`/evaluate`, `/evaluate/status`, their `/text/` counterparts and `/prometheus/`.
+Rate limits are per-IP:
 10r/s general (burst 20), 1r/s on train (burst 5), 30r/s on the monitoring UIs
 (burst 60), `limit_req_status 429`. Body cap 10 MB.
 
@@ -450,18 +451,18 @@ during a DagsHub outage instead of degrading to the local model. With the cap th
 same startup took 10.7s. Raise `MLFLOW_HTTP_REQUEST_MAX_RETRIES` /
 `MLFLOW_HTTP_REQUEST_TIMEOUT` to override.
 
-Both modalities cap it, but they pay it at different moments. The text service
-resolves the registry when it loads its model, so an outage delays **startup**.
-The image service resolves lazily on the first `/predict`, so the same outage
-delays **one request** instead, once, because the failure latches and every
-later request goes straight to the local artifact.
+Both modalities pay it at the same moment. Each resolves the registry inside its
+lifespan, so an outage delays **startup** by at most the capped budget and never
+delays a request. The image service used to resolve lazily on the first
+`/predict`, moving the same delay onto one request instead; that is no longer
+true of either service.
 
 ---
 
 ## Docker
 
-Four containers: three FastAPI services (all from the **same image**, with
-per-service `command:` overrides) plus nginx.
+Six services: three FastAPI apps (all from the **same image**, with per-service
+`command:` overrides), nginx, Prometheus and Grafana.
 
 ```bash
 # one-time: create the basic-auth file (gitignored)
@@ -469,13 +470,13 @@ printf "admin:$(openssl passwd -apr1)\n" > nginx/.htpasswd
 
 docker compose build
 docker compose up -d
-docker compose ps           # all four should read (healthy)
+docker compose ps           # all six should read (healthy)
 curl http://localhost/health
 curl http://localhost/text/health
 curl http://localhost/fusion/health
 ```
 
-Nginx waits for all three services to be *healthy*, not merely started. Memory
+Nginx waits for all five backends to be *healthy*, not merely started. Memory
 limits, measured with `docker stats` during a live fusion request:
 
 | container | measured | limit |
@@ -486,7 +487,9 @@ limits, measured with `docker stats` during a live fusion request:
 | rakuten-nginx | 5.3 MiB | 128m |
 
 All eight containers including the Airflow stack total ~1.04 GiB against a
-4.807 GiB WSL2 ceiling. The text and gateway limits are generous rather than
+4.807 GiB WSL2 ceiling. Prometheus and Grafana are not in the table; both are
+capped at 512m in `docker-compose.yml` and the Prometheus figure is marked
+provisional there. The text and gateway limits are generous rather than
 tight; re-measure before lowering. Too tight a limit shows up as a retrain
 OOM-killed midway, not an obvious error.
 
@@ -516,7 +519,7 @@ interchangeable and mixing them up costs time:
 
 | password | lives in | opens |
 |---|---|---|
-| nginx basic auth | `nginx/.htpasswd` (hashed, unreadable) | `/train`, `/evaluate`, `/prometheus/` |
+| nginx basic auth | `nginx/.htpasswd` (hashed, unreadable) | `/train`, `/evaluate`, `/text/train`, `/text/evaluate`, `/prometheus/` |
 | Grafana admin | `GRAFANA_ADMIN_PASSWORD` in `.env` | the Grafana login page |
 | DagsHub token | `MLFLOW_TRACKING_PASSWORD` in `.env` | MLflow tracking + DVC remote |
 
@@ -540,9 +543,9 @@ forgotten password can only be replaced, never recovered.
 it reads from the running process, not from disk. The metric keeps its
 `modality` label, and grouping by it is useful, but the dashboard's serving table
 hides that column, because it duplicates `service` on every row except the
-gateway's (`fusion` vs `gateway`). The image service reports
-`not-loaded` until its first real `/predict`, which is the documented lazy-load
-wart, not a fault.
+gateway's (`fusion` vs `gateway`). Both model services report a real source from
+boot, because both resolve in their lifespan, so `not-loaded` means an actual
+failure to resolve anything rather than a service nobody has called yet.
 
 The `path` label is always the **route template** (`/predict`), never the raw
 URL, and anything unmatched is recorded as `unmatched`. That is deliberate:
@@ -658,17 +661,20 @@ docker compose -f docker-compose.yml up -d                    # the services
 docker compose -f docker-compose.airflow.yml up -d            # the scheduler stack
 ```
 
-DAG `rakuten_image_pipeline`: `collect_guard >> process_guard >> train >> evaluate`,
-`schedule=None`, `retries=0`, `max_active_runs=1`. A full run takes **~1015s**.
-It registers a new model version and **never promotes**.
+**Both modalities are orchestrated**, one DAG each. Both are `schedule=None`,
+`retries=0`, `max_active_runs=1`, and both register a new model version and
+**never promote**:
+
+| DAG | tasks |
+|---|---|
+| `rakuten_image_pipeline` | `collect_guard >> process_guard >> train >> evaluate` |
+| `rakuten_text_pipeline` | `data_guard >> train >> evaluate` |
+
+The image run was last timed at **~1015s**. The text run has not been timed since
+the DAG was added. Nothing checks either number, so treat both as indicative.
 
 > The dag-processor refresh interval is the default **300s**, so a new or edited
 > DAG can take up to five minutes to appear.
-
-> ⚠️ **Airflow covers the image modality only.** Text is not orchestrated: the
-> text service has no `/train` endpoint, so retraining text is a host-side
-> command. Extending the DAG means first deciding whether orchestration drives an
-> endpoint (which must be built) or a container command.
 
 ---
 
