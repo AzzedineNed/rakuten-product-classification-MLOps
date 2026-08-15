@@ -204,8 +204,20 @@ def load_from_registry(alias: Optional[str] = None) -> dict:
     return payload
 
 
+def _prefixed(key: str, prefix: str) -> str:
+    """Prefix a metric name with the split it came from, idempotently.
+
+    Metric names are the only place a reader learns whether a number is val or
+    test, so evaluation metrics carry one. Keys that already start with the
+    prefix are returned unchanged: evaluate.py reports test_samples, which is
+    already correct and must not become test_test_samples.
+    """
+    return key if key.startswith(prefix) else f"{prefix}{key}"
+
+
 def attach_evaluation(run_id: Optional[str], metrics: dict,
-                      artifacts: Optional[Iterable[Tuple[str, Path]]] = None) -> None:
+                      artifacts: Optional[Iterable[Tuple[str, Path]]] = None,
+                      prefix: str = "test_") -> None:
     """Attach test metrics and report artifacts to the training run.
 
     Falls back to a standalone run when no run_id is available, so an evaluation
@@ -235,7 +247,12 @@ def attach_evaluation(run_id: Optional[str], metrics: dict,
                 mlflow.set_tag("stage", "evaluate-standalone")
             # Log only numeric metrics (skip the string entries backbone /
             # classifier_type that evaluate.py carries in the same dict).
-            numeric = {k: float(v) for k, v in metrics.items()
+            #
+            # PREFIXED, because training logs val_f1_weighted on this same run
+            # and an unprefixed f1_weighted next to it says nothing about which
+            # split produced it. A key that already carries the prefix is left
+            # alone, so test_samples does not become test_test_samples.
+            numeric = {_prefixed(k, prefix): float(v) for k, v in metrics.items()
                        if isinstance(v, (int, float)) and not isinstance(v, bool)}
             mlflow.log_metrics(numeric)
             for artifact_path, local in (artifacts or ()):

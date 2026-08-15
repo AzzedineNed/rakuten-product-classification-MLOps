@@ -143,7 +143,14 @@ def entrainer(args):
 
     # Tracking is best-effort and happens AFTER the artifacts are on disk, so
     # a tracking outage can never cost us a trained model.
-    run_id = tracking.log_training_run(config.run_params(), metrics)
+    #
+    # val_metrics() renames the three scores ON THE WAY TO MLFLOW ONLY. They are
+    # validation numbers, and evaluate_text.py logs test_ ones onto this same
+    # run; unprefixed they would sit side by side saying nothing about which
+    # split each came from. `metrics` itself keeps its bare keys, because
+    # reports/, the /train response and the DAG all read them.
+    run_id = tracking.log_training_run(config.run_params(),
+                                       tracking.val_metrics(metrics))
 
     split_meta = {
         "mlflow_run_id": run_id,

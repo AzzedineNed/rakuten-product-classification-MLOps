@@ -546,7 +546,7 @@ def test_attach_evaluation_reopens_the_training_run(tmp_path, monkeypatch):
                                artifacts=[("reports", report)])
 
     run = mlflow.get_run(run_id)
-    assert run.data.metrics["f1_weighted"] == pytest.approx(0.79)
+    assert run.data.metrics["test_f1_weighted"] == pytest.approx(0.79)
     assert run.data.metrics["train_samples"] == pytest.approx(10)
     assert run.data.tags["stage"] == "train"
 
@@ -558,7 +558,8 @@ def test_attach_evaluation_skips_non_numeric_metrics(tmp_path, monkeypatch):
     mlflow = _tracking_server(tmp_path, monkeypatch)
     run_id = tracking.log_training_run({}, {})
     tracking.attach_evaluation(run_id, {"accuracy": 0.5, "backbone": "mobilenet_v2"})
-    assert "backbone" not in mlflow.get_run(run_id).data.metrics
+    metrics = mlflow.get_run(run_id).data.metrics
+    assert "backbone" not in metrics and "test_backbone" not in metrics
 
 
 @pytest.mark.slow
@@ -603,7 +604,7 @@ def test_a_missing_artifact_is_skipped_not_raised(tmp_path, monkeypatch):
     tracking.attach_evaluation(run_id, {"f1": 0.5},
                                artifacts=[("plots", tmp_path / "absent.png")])
 
-    assert mlflow.get_run(run_id).data.metrics["f1"] == pytest.approx(0.5)
+    assert mlflow.get_run(run_id).data.metrics["test_f1"] == pytest.approx(0.5)
     from mlflow import MlflowClient
     assert MlflowClient().list_artifacts(run_id, "plots") == []
 
@@ -652,3 +653,34 @@ def test_operator_can_raise_the_serving_http_limits(tmp_path, monkeypatch):
     with pytest.raises(Exception):
         tracking.load_from_registry()
     assert os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] == "9"
+
+
+# --------------------------------------------------------------------------
+# metric names carry their split (wart 23)
+# --------------------------------------------------------------------------
+def test_prefixed_adds_the_split_to_a_bare_metric_name():
+    """Bare f1_weighted on a run that also holds val_f1_weighted says nothing
+    about which split produced it. This is the rename that fixes that."""
+    assert tracking._prefixed("f1_weighted", "test_") == "test_f1_weighted"
+
+
+def test_prefixed_does_not_stack_a_prefix_it_already_has():
+    """evaluate.py reports test_samples, which is already right. Prefixing
+    blindly would file it as test_test_samples."""
+    assert tracking._prefixed("test_samples", "test_") == "test_samples"
+
+
+@pytest.mark.slow
+def test_attach_evaluation_files_metrics_under_the_split(tmp_path, monkeypatch):
+    """The whole point: after training logs val_f1_weighted and evaluation logs
+    its own weighted F1, the run must hold BOTH under distinguishable names."""
+    mlflow = _tracking_server(tmp_path, monkeypatch)
+    run_id = tracking.log_training_run({}, {"val_f1_weighted": 0.5468})
+    tracking.attach_evaluation(run_id, {"f1_weighted": 0.5470, "test_samples": 17})
+
+    metrics = mlflow.get_run(run_id).data.metrics
+    assert metrics["val_f1_weighted"] == pytest.approx(0.5468)
+    assert metrics["test_f1_weighted"] == pytest.approx(0.5470)
+    assert metrics["test_samples"] == pytest.approx(17)
+    assert "f1_weighted" not in metrics
+    assert "test_test_samples" not in metrics

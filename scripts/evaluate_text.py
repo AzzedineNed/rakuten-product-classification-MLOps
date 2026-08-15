@@ -210,6 +210,10 @@ def evaluer(args):
     # Reopen the SAME run train.py created, so one registered version has one
     # complete record: params + val metrics from training, test metrics and
     # plots from here. Falls back to a standalone run if there is no id.
+    #
+    # The prefix follows --split. With a hardcoded "test_" a `--split val` run
+    # would file validation numbers under test_f1_weighted, on the training run
+    # that already holds the real val numbers, and nothing would flag it.
     tracking.attach_evaluation(
         meta.get("mlflow_run_id"),
         metrics,
@@ -217,6 +221,7 @@ def evaluer(args):
             "plots": config.CONFUSION_MATRIX_PATH,
             "reports": config.CLASSIFICATION_REPORT_PATH,
         },
+        prefix=f"{args.split}_",
     )
 
     if args.predict_test:

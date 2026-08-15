@@ -332,3 +332,65 @@ def test_registry_reachable_but_model_unregistered_falls_back(tmp_path, monkeypa
     local = tmp_path / "local"
     predictor = _predictor(local).load(prefer_registry=True)
     assert predictor.serving_source == f"local:{config.MODEL_PATH.name}"
+
+
+# --------------------------------------------------------------------------
+# metric names carry their split (wart 23)
+#
+# The text side had the INVERSE of the image side's problem: training logged a
+# bare f1_weighted meaning VAL, evaluation logged test_f1_weighted meaning
+# TEST. Read across the two experiments, "f1_weighted" therefore meant test on
+# image and val on text. These tests pin both halves of the fix.
+# --------------------------------------------------------------------------
+def test_val_metrics_renames_only_the_scores():
+    """Counts and timings share the dict and are not scores. Renaming n_train
+    to val_n_train would be wrong and would break the registry tag that reads
+    it."""
+    renamed = tracking.val_metrics({
+        "accuracy": 0.77, "f1_weighted": 0.78, "f1_macro": 0.76,
+        "n_train": 67929, "n_val": 8491, "training_time_sec": 78.2,
+    })
+    assert renamed["val_accuracy"] == 0.77
+    assert renamed["val_f1_weighted"] == 0.78
+    assert renamed["val_f1_macro"] == 0.76
+    assert renamed["n_train"] == 67929
+    assert renamed["training_time_sec"] == 78.2
+    assert "accuracy" not in renamed
+
+
+def test_val_metrics_leaves_the_callers_dict_alone():
+    """reports/, the /train response and the DAG all read the bare keys. This
+    rename is for MLflow only."""
+    original = {"accuracy": 0.77, "n_train": 10}
+    tracking.val_metrics(original)
+    assert original == {"accuracy": 0.77, "n_train": 10}
+
+
+def test_attach_evaluation_defaults_to_the_test_prefix():
+    """The default must stay test_: that is what the Makefile and the /evaluate
+    endpoint produce, and changing it would silently re-label history."""
+    assert inspect.signature(
+        tracking.attach_evaluation).parameters["prefix"].default == "test_"
+
+
+@pytest.mark.slow
+def test_attach_evaluation_honours_a_val_prefix(tmp_path, monkeypatch):
+    """scripts/evaluate_text.py --split val re-scores validation. With a
+    hardcoded test_ those numbers landed under test_f1_weighted, on the very
+    run that already held the real val numbers."""
+    mlflow = pytest.importorskip("mlflow", reason="mlflow not installed (CI subset)")
+    uri = f"sqlite:///{tmp_path}/mlflow.db"
+    mlflow.set_tracking_uri(uri)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
+    monkeypatch.setattr(config, "EXPERIMENT_NAME", "text-prefix-test")
+    mlflow.create_experiment("text-prefix-test",
+                             artifact_location=str(tmp_path / "artifacts"))
+
+    run_id = tracking.log_training_run({}, tracking.val_metrics({"f1_weighted": 0.7818}))
+    tracking.attach_evaluation(run_id, {"f1_weighted": 0.7780, "n_eval": 100},
+                               prefix="val_")
+
+    metrics = mlflow.get_run(run_id).data.metrics
+    assert metrics["val_f1_weighted"] == pytest.approx(0.7780)
+    assert metrics["val_n_eval"] == pytest.approx(100)
+    assert "test_f1_weighted" not in metrics

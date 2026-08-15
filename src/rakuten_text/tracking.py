@@ -207,13 +207,45 @@ def load_from_registry(alias: Optional[str] = None):
     return vectorizer, model, source
 
 
+# The three scores train_text.py computes on the validation split. Counts and
+# timings in the same dict (n_train, n_val, training_time_sec) are not scores
+# and must not be renamed.
+VAL_SCORES = ("accuracy", "f1_weighted", "f1_macro")
+
+
+def val_metrics(metrics: dict) -> dict:
+    """Rename the validation scores to val_* on the way to MLflow.
+
+    The caller's dict keeps its bare keys: reports/, the /train response and
+    the Airflow DAG all read them. Only the tracking copy is renamed, so a
+    reader of the MLflow run can tell these apart from the test_* metrics
+    evaluate_text.py attaches to the same run.
+    """
+    return {f"val_{k}" if k in VAL_SCORES else k: v for k, v in metrics.items()}
+
+
+def _prefixed(key: str, prefix: str) -> str:
+    """Prefix a metric name with the split it came from, idempotently.
+
+    Metric names are the only place a reader learns whether a number is val or
+    test. Keys that already start with the prefix are returned unchanged.
+    Mirrors rakuten_img.tracking._prefixed.
+    """
+    return key if key.startswith(prefix) else f"{prefix}{key}"
+
+
 def attach_evaluation(run_id: Optional[str], metrics: dict,
-                      artifacts: Optional[dict] = None) -> None:
-    """Attach test metrics and report artifacts to the training run.
+                      artifacts: Optional[dict] = None,
+                      prefix: str = "test_") -> None:
+    """Attach evaluation metrics and report artifacts to the training run.
 
     Falls back to a standalone run when no run_id is available, so an
     evaluation is never silently unrecorded. `artifacts` maps an mlflow
     artifact_path to a local file. Never raises.
+
+    `prefix` says which split produced the numbers. It is a parameter and not
+    a hardcoded "test_" because evaluate_text.py supports --split val, which
+    used to log validation numbers under test_ names.
     """
     if not enabled():
         return
@@ -230,7 +262,7 @@ def attach_evaluation(run_id: Optional[str], metrics: dict,
                 # training run we leave stage="train" intact -- overwriting it
                 # would erase how the run started. Mirrors scripts/evaluate.py.
                 mlflow.set_tag("stage", "evaluate-standalone")
-            numeric = {f"test_{k}": float(v) for k, v in metrics.items()
+            numeric = {_prefixed(k, prefix): float(v) for k, v in metrics.items()
                        if isinstance(v, (int, float))}
             mlflow.log_metrics(numeric)
             for artifact_path, local in (artifacts or {}).items():
