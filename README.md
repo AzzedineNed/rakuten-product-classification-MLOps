@@ -623,13 +623,12 @@ ever disagree on a version: a subset is only trustworthy if it cannot drift.
   existence, which was unrelated to what was served; that value is still
   available as `local_model_present`, which is what you want when a registry
   fetch has failed and the fallback is what is running.
-- **`model_source` reads `not-loaded` until the first `/predict`** (lazy torch
-  import), so a freshly restarted image container looks unloaded but is healthy.
-- **nginx keeps a stale backend IP after `docker compose up --build`.** Recreating
-  a service gives it a new IP; nginx resolved the old one at startup and returns
-  **502** until `docker compose restart nginx`. `docker compose restart <service>`
-  reuses the container and its IP, so it does *not* need this. Same family as the
-  bind-mounted-config wart above, different trigger.
+- **nginx follows a backend that changed IP, within 10 seconds.** It used to
+  resolve each name once at startup, so recreating a service returned **502**
+  until `docker compose restart nginx`. The config now targets a variable and
+  uses Docker's embedded DNS at runtime, with `valid=10s` capping how long an
+  address is reused. Editing the config file itself is unchanged: that is still
+  a bind mount, and still needs the restart described above.
 - **Train/eval status is in-memory.** An API restart resets it to `idle`, which
   the DAG's poller treats as an error.
 - **Prometheus does not reload a bind-mounted config either.** Same trap as
