@@ -202,7 +202,23 @@ services:
 
   # --- MONITORING (mentor item 5) ---------------------------------------
   prometheus:
-    image: prom/prometheus:v3.0.0
+    # v3.13.2 (2026-07-29), the current release of the v3 line. Bumped from
+    # v3.0.0 (2024-11-14), which was two years stale, for nine security fixes,
+    # two of them stored XSS in the web UI - and this UI is reachable at
+    # /prometheus/ behind nginx basic auth, so it is exposed to anyone holding
+    # that password. Every [CHANGE] entry between the two versions was read and
+    # none touch this deployment: they cover service discovery backends,
+    # remote write, promtool paths, native histograms and rule pagination. The
+    # config here is four static_configs targets with no relabel, no auth, no
+    # rules and no remote write.
+    #
+    # DO NOT ADD THE -distroless SUFFIX. Since 3.10.0 the image ships in two
+    # variants. The plain tag is still the busybox one and still runs as nobody
+    # with a VOLUME declaration on /prometheus, which is exactly what the named
+    # volume below depends on. The distroless variant runs as uid 65532 and
+    # REMOVES the VOLUME declaration, so switching to it would break
+    # prometheus-data's ownership and Prometheus would fail to write its TSDB.
+    image: prom/prometheus:v3.13.2
     container_name: rakuten-prometheus
     # No host port, same rule as every other service: nginx on :80 stays the
     # only public entrypoint. Reaching the Prometheus UI is handled separately.
@@ -220,6 +236,11 @@ services:
       - --storage.tsdb.path=/prometheus
       # 15 days on a laptop with four targets is a few tens of MB. The default
       # is also 15d; stated explicitly so it is a decision, not an accident.
+      # NOTE: 3.11.0 fixed a unit mismatch that made this value 1e6 times
+      # longer than configured. Whether v3.0.0 was affected is UNKNOWN, read
+      # off the changelog and not tested. If the TSDB holds more than 15 days
+      # of data on the old pin, that is the likely reason and this bump fixes
+      # it.
       - --storage.tsdb.retention.time=15d
       # Tells Prometheus the URL humans reach it on, so its redirects and the
       # links in its own UI carry the /prometheus/ prefix nginx adds.
@@ -241,9 +262,12 @@ services:
     # `docker stats` and tighten, the same way the other limits were.
     mem_limit: 512m
 
-    # VERIFIED on prom/prometheus:v3.0.0: the image ships busybox wget at
-    # /bin/wget and no curl, so this uses the same wget form as the nginx
-    # service above. /-/healthy is Prometheus's own liveness endpoint and does
+    # VERIFIED on prom/prometheus:v3.0.0, NOT RE-VERIFIED on v3.13.2: the image
+    # ships busybox wget at /bin/wget and no curl, so this uses the same wget
+    # form as the nginx service above. The v3.13.2 Dockerfile still builds on
+    # the same quay.io/prometheus/busybox base, so wget is expected to still be
+    # there, but that was read off the Dockerfile, not run in the container.
+    # /-/healthy is Prometheus's own liveness endpoint and does
     # not depend on any scrape target being reachable - a stack where every
     # target is down should still show Prometheus itself as healthy.
     healthcheck:
